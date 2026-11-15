@@ -2,14 +2,20 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。隐藏后可从 Vnite 托盘菜单重新唤出。",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
   "author": "Local",
   "license": "MIT",
   "category": "common",
-  "keywords": ["ui", "desktop", "floating", "orb", "playstation"],
+  "keywords": [
+    "ui",
+    "desktop",
+    "floating",
+    "orb",
+    "playstation"
+  ],
   "configuration": [
     {
       "id": "size",
@@ -18,11 +24,22 @@
       "description": "桌面悬浮球的直径。",
       "default": "64",
       "options": [
-        { "label": "小 (52px)", "value": "52" },
-        { "label": "中 (64px)", "value": "64" },
-        { "label": "大 (76px)", "value": "76" }
+        {
+          "label": "小 (52px)",
+          "value": "52"
+        },
+        {
+          "label": "中 (64px)",
+          "value": "64"
+        },
+        {
+          "label": "大 (76px)",
+          "value": "76"
+        }
       ],
-      "controlOptions": { "controlType": "select" }
+      "controlOptions": {
+        "controlType": "select"
+      }
     },
     {
       "id": "accent",
@@ -31,11 +48,22 @@
       "description": "光环与按钮的颜色。",
       "default": "blue",
       "options": [
-        { "label": "经典蓝", "value": "blue" },
-        { "label": "午夜紫", "value": "violet" },
-        { "label": "极光青", "value": "cyan" }
+        {
+          "label": "经典蓝",
+          "value": "blue"
+        },
+        {
+          "label": "午夜紫",
+          "value": "violet"
+        },
+        {
+          "label": "极光青",
+          "value": "cyan"
+        }
       ],
-      "controlOptions": { "controlType": "select" }
+      "controlOptions": {
+        "controlType": "select"
+      }
     },
     {
       "id": "sound",
@@ -43,7 +71,9 @@
       "title": "音效",
       "description": "展开、合上与启动时的短促提示音。",
       "default": true,
-      "controlOptions": { "controlType": "switch" }
+      "controlOptions": {
+        "controlType": "switch"
+      }
     },
     {
       "id": "hotkey",
@@ -51,7 +81,9 @@
       "title": "快捷键 Ctrl+Alt+P",
       "description": "用 Ctrl+Alt+P 显示或隐藏悬浮球。",
       "default": true,
-      "controlOptions": { "controlType": "switch" }
+      "controlOptions": {
+        "controlType": "switch"
+      }
     }
   ]
 }
