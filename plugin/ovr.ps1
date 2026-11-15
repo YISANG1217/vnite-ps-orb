@@ -137,11 +137,27 @@ function Get-Lines($stream) {
   } finally {
     $bitmap.Dispose()
   }
-  $lines = @()
+  # OCR 返回的行顺序不保证是从上到下（多行对话框经常被打乱），
+  # 按行外接矩形的上边界（20px 归并同一行）、再按左边界排序，恢复阅读顺序
+  $items = @()
   foreach ($line in $result.Lines) {
     $t = $line.Text.Trim()
-    if ($t -ne '') { $lines += $t }
+    if ($t -eq '') { continue }
+    $top = [double]::MaxValue
+    $left = [double]::MaxValue
+    foreach ($word in $line.Words) {
+      $rect = $word.BoundingRect
+      if ($rect.Top -lt $top) { $top = $rect.Top }
+      if ($rect.Left -lt $left) { $left = $rect.Left }
+    }
+    if ($top -eq [double]::MaxValue) { $top = 0; $left = 0 }
+    $items += [pscustomobject]@{ Text = $t; Top = $top; Left = $left }
   }
+  $lines = @(
+    $items |
+      Sort-Object -Property @{ Expression = { [int][Math]::Round($_.Top / 20) } }, @{ Expression = { $_.Left } } |
+      ForEach-Object { $_.Text }
+  )
   return ,$lines
 }
 
