@@ -24,20 +24,22 @@
 
 点面板底部「框选区域」，在游戏对话框上拖一个矩形。之后每次换台词都会截取这块区域识别成日文再翻译。
 
-### Textractor 文本文件（零误读，推荐）
+### Textractor 剪贴板（零误读，推荐）
 
 OCR 在花哨的游戏字体上总会错几个字，想完全准确可以直接读游戏文本：
 
-1. 安装 [Textractor](https://github.com/Artikash/Textractor)（x64 版），启动游戏后 Attach 到游戏进程，选到能持续输出台词的文本线程
-2. 在 Textractor 里启用扩展 `Save to File`（保存文本到文件），设一个输出文件，例如 `D:\Games\saved.txt`
-3. 插件设置里把「取词方式」改为 `Textractor 文本文件`，把同一个路径填到「Textractor 文本文件路径」
-4. 重新点一次「实时翻译」开关
+1. 打开 Textractor，`Attach` 到正在运行的游戏，在左侧线程列表里选到台词最完整的那条线程
+2. 菜单 `Extensions` 里勾上 `Copy to Clipboard`（Textractor 自带，出现新台词时自动写入剪贴板）
+3. 插件设置里把「取词方式」改为 `Textractor 剪贴板`
+4. 重新点一次面板上的「实时翻译」
 
-之后插件只读这个文件里新增的行，不截屏、不做 OCR：字一个不差，换台词瞬间出字幕，CPU 几乎为零。
+之后插件每 200ms 读一次剪贴板，出现新台词立刻分词+翻译：字一个不差、无延迟、不截屏也不做 OCR。
+
+> 注意这条路会独占剪贴板（Textractor 每句都会清空并写入），复制别的东西会被覆盖。另有「Textractor 文本文件」模式，适合用 Lua 脚本或扩展把台词落到文件里的场景。
 
 ## 安装
 
-1. 下载 `local-vnite-ps-orb-1.12.2.vnpkg`
+1. 下载 `local-vnite-ps-orb-1.13.0.vnpkg`
 2. 打开 Vnite → 设置 → 插件 → 安装本地插件，选择该文件
 3. 启用「PlayStation 悬浮球」
 

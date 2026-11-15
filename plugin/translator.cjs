@@ -1,6 +1,6 @@
 // 悬浮球里的「实时翻译字幕」：截屏 → Windows OCR → 翻译 → 底部字幕条。
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
-const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 const { writeFileSync, openSync, readSync, closeSync, statSync, promises: fsPromises } = require('node:fs');
 const path = require('node:path');
@@ -71,7 +71,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.fontSize = Number.isFinite(fontSize) ? clamp(fontSize, 14, 40) : 22;
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
-    cfg.source = preferences?.translateSource === 'textractor' ? 'textractor' : 'ocr';
+    const source = preferences?.translateSource;
+    cfg.source = source === 'textractor' || source === 'clipboard' ? source : 'ocr';
     cfg.textFile = String(preferences?.translateTextFile || '').trim();
     cfg.stream = preferences?.translateStream === true;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
@@ -866,7 +867,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   async function tick() {
     loopTimer = null;
-    if (!running || cfg.source === 'textractor') return;
+    if (!running || cfg.source !== 'ocr') return;
     const started = Date.now();
     if (captureMode === 'stream') {
       // 帧由渲染进程推送，这里只做存活检查：流 9 秒没动静就回落
@@ -908,6 +909,30 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
             : 0
         : 0;
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
+  }
+
+  // ————— Textractor 剪贴板 —————
+  // Textractor 自带的「Copy to Clipboard」扩展每出现一句新台词就写一次剪贴板，
+  // 这里轮询剪贴板拿文本：不截屏、不识别，字一个不差。
+  let clipboardTimer = null;
+  let lastClipboard = '';
+
+  function stopClipWatch() {
+    if (clipboardTimer) clearInterval(clipboardTimer);
+    clipboardTimer = null;
+  }
+
+  function startClipWatch() {
+    stopClipWatch();
+    lastClipboard = (clipboard.readText() || '').trim();
+    clipboardTimer = setInterval(() => {
+      if (!running || cfg.source !== 'clipboard') return;
+      const text = (clipboard.readText() || '').trim();
+      if (!text || text === lastClipboard) return;
+      lastClipboard = text;
+      if (text.length < 2) return;
+      Promise.resolve(acceptText(text)).catch(() => {});
+    }, 200);
   }
 
   // ————— Textractor 文本文件 —————
@@ -985,7 +1010,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       createStudy();
       placeStudy();
     }
-    if (cfg.source === 'textractor') {
+    if (cfg.source === 'clipboard') {
+      startClipWatch();
+    } else if (cfg.source === 'textractor') {
       // 取词来自文本文件，不需要截屏识别
       startFileWatch();
     } else if (cfg.region) {
@@ -1010,6 +1037,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     if (pumpTimer) clearTimeout(pumpTimer);
     pumpTimer = null;
     pendingFrame = null;
+    stopClipWatch();
     stopFileWatch();
     stopOcr();
     stopCaptureStream();
