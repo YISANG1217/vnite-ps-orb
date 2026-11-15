@@ -573,19 +573,29 @@ async function activate(api) {
     refreshTrayMenu();
   }
 
-  const hotkeyEnabled = initialPreferences?.hotkey !== false;
-  if (hotkeyEnabled) {
-    let registered = false;
-    try {
-      registered = globalShortcut.register('Control+Alt+P', () => {
-        if (!win || win.isDestroyed()) return;
-        toggleVisible();
-      });
-    } catch (error) {
-      console.warn('[PS 悬浮球] 注册快捷键失败', error);
+  let hotkeyOn = false;
+
+  function applyHotkey(enabled) {
+    if (enabled === hotkeyOn) return;
+    if (enabled) {
+      let registered = false;
+      try {
+        registered = globalShortcut.register('Control+Alt+P', () => {
+          if (!win || win.isDestroyed()) return;
+          toggleVisible();
+        });
+      } catch (error) {
+        console.warn('[PS 悬浮球] 注册快捷键失败', error);
+      }
+      if (!registered) console.warn('[PS 悬浮球] Ctrl+Alt+P 已被其他程序占用');
+      hotkeyOn = registered;
+    } else {
+      globalShortcut.unregister('Control+Alt+P');
+      hotkeyOn = false;
     }
-    if (!registered) console.warn('[PS 悬浮球] Ctrl+Alt+P 已被其他程序占用');
   }
+
+  applyHotkey(initialPreferences?.hotkey !== false);
 
   const onDisplayChange = () => {
     if (!win || win.isDestroyed()) return;
@@ -597,7 +607,40 @@ async function activate(api) {
 
   installTrayEntry();
 
+  // Vnite 没有提供配置变更事件，这里轻量轮询，让设置改完立即生效。
+  let prefsTimer = null;
+  let syncing = false;
+
+  async function syncPreferences() {
+    if (syncing || !win || win.isDestroyed()) return;
+    syncing = true;
+    try {
+      const preferences = await readPreferences();
+      const before = { size: orbSize, accent, sound };
+      applyOptions(preferences);
+      applyHotkey(preferences?.hotkey !== false);
+      const sizeChanged = before.size !== orbSize;
+      if (sizeChanged) {
+        if (expanded) {
+          expanded = false;
+          send(CHANNELS.forceCollapse);
+        }
+        placeWindow();
+      }
+      if (sizeChanged || before.accent !== accent || before.sound !== sound) {
+        send(CHANNELS.layout, layoutPayload({ sound }));
+      }
+    } catch {
+      /* 读取配置失败时保持现状，等下一轮 */
+    } finally {
+      syncing = false;
+    }
+  }
+
+  prefsTimer = setInterval(syncPreferences, 1200);
+
   dispose = async () => {
+    clearInterval(prefsTimer);
     removeTrayEntry();
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);

@@ -108,6 +108,7 @@
     if (payload.accent) root.dataset.accent = payload.accent;
     if (payload.side) root.dataset.side = payload.side;
     if (payload.anchor) root.dataset.anchor = payload.anchor;
+    if (typeof payload.sound === 'boolean') state.sound = payload.sound;
   }
 
   // 透明窗口固定为展开尺寸，只有悬浮球与面板区域接收鼠标，其余区域穿透到桌面。
