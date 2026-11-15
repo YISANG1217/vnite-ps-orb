@@ -862,11 +862,51 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return ocrSend(`cap ${x} ${y} ${width} ${height}${masks}`, 5000);
   }
 
+  // 两套预处理的结果里挑更像日文的那份：OCR 出错最典型的表现是假名被认成
+  // 半角字母/数字、或者混进奇怪符号，按字符类别打分就能把这类垃圾档筛掉。
+  function jpScore(text) {
+    if (!text) return -Infinity;
+    let kana = 0;
+    let kanji = 0;
+    let latin = 0;
+    let digit = 0;
+    let weird = 0;
+    let useful = 0;
+    for (const char of text) {
+      if (/[\u3041-\u3096\u30a1-\u30fa\u30fc]/.test(char)) kana += 1;
+      else if (/[\u4e00-\u9fff\u3005]/.test(char)) kanji += 1;
+      else if (/[A-Za-z]/.test(char)) latin += 1;
+      else if (/[0-9]/.test(char)) digit += 1;
+      else if (/[、。，．！？…「」『』（）()・ー〜\s]/.test(char)) useful += 1;
+      else weird += 1;
+    }
+    const total = kana + kanji + latin + digit + weird + useful;
+    if (!total) return -Infinity;
+    return (kana * 1.0 + kanji * 0.9 + useful * 0.2 - latin * 1.6 - digit * 1.6 - weird * 2.2) / total;
+  }
+
+  function pickBetter(base, alt) {
+    if (!alt) return base;
+    if (!base) return alt;
+    const delta = jpScore(alt) - jpScore(base);
+    // 分数接近时取更长的一份：漏字比错字更难靠翻译补救
+    if (Math.abs(delta) < 0.05) return alt.length > base.length ? alt : base;
+    return delta > 0 ? alt : base;
+  }
+
   // OCR 行 → 文本：先拼接，再用词典把浊点误读纠回来（ブ↔プ、が↔か）
   async function textFromResult(result) {
-    const raw = normalizeText(result.lines || []);
-    if (!raw) return '';
-    return analyzer.correct(raw).catch(() => raw);
+    const baseRaw = normalizeText(result.lines || []);
+    const altRaw = normalizeText(result.alt || []);
+    const base = baseRaw ? await analyzer.correct(baseRaw).catch(() => baseRaw) : '';
+    const alt = altRaw ? await analyzer.correct(altRaw).catch(() => altRaw) : '';
+    const text = pickBetter(base, alt);
+    if (alt && alt !== base) {
+      clipLog(
+        `ocr base=${JSON.stringify(base.slice(0, 40))} alt=${JSON.stringify(alt.slice(0, 40))} pick=${text === alt ? 'alt' : 'base'}`
+      );
+    }
+    return text;
   }
 
   async function processFrame() {

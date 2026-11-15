@@ -115,9 +115,48 @@ function Get-OcrBitmap($bmp) {
   return $scaled
 }
 
-# 位图 → BMP 内存流 → 识别
-function Get-Lines-From-Bitmap($bmp) {
-  $ocrBmp = Get-OcrBitmap $bmp
+# 第二套预处理：灰度 + 对比度拉伸 + 2 倍放大。
+# Windows OCR 对小字、彩色背景上的字幕最不稳定，灰度化能去掉背景色干扰，
+# 提高倍率则让假名的浊点、长音这些细节更容易被分出来。
+function Get-OcrBitmapEnhanced($bmp) {
+  $pixelBudget = 2000000
+  $area = [double]$bmp.Width * [double]$bmp.Height
+  $scale = 2.0
+  if ($area -gt 0) { $scale = [Math]::Min(2.0, [Math]::Sqrt($pixelBudget / $area)) }
+  if ($scale -lt 1.2) { $scale = 1.2 }
+  $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $scale))
+  $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $scale))
+  $out = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $g = [System.Drawing.Graphics]::FromImage($out)
+  $attrs = New-Object System.Drawing.Imaging.ImageAttributes
+  try {
+    $g.Clear([System.Drawing.Color]::Black)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $m = New-Object System.Drawing.Imaging.ColorMatrix
+    $m.Matrix00 = 0.34; $m.Matrix01 = 0.34; $m.Matrix02 = 0.34
+    $m.Matrix10 = 0.34; $m.Matrix11 = 0.34; $m.Matrix12 = 0.34
+    $m.Matrix20 = 0.34; $m.Matrix21 = 0.34; $m.Matrix22 = 0.34
+    $m.Matrix33 = 1.0
+    $m.Matrix40 = -0.18; $m.Matrix41 = -0.18; $m.Matrix42 = -0.18
+    $attrs.SetColorMatrix($m)
+    $attrs.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $w, $h)
+    $g.DrawImage($bmp, $rect, 0, 0, $bmp.Width, $bmp.Height, [System.Drawing.GraphicsUnit]::Pixel, $attrs)
+  } finally {
+    $g.Dispose()
+    $attrs.Dispose()
+  }
+  return $out
+}
+
+# 位图 → BMP 内存流 → 识别；-Enhanced 使用灰度增强那一套
+function Get-Lines-From-Bitmap($bmp, [switch]$Enhanced) {
+  if ($Enhanced) {
+    $ocrBmp = Get-OcrBitmapEnhanced $bmp
+  } else {
+    $ocrBmp = Get-OcrBitmap $bmp
+  }
   $ms = New-Object System.IO.MemoryStream
   $stream = $null
   try {
@@ -183,10 +222,6 @@ function Get-Lines($stream) {
     $lines += (($row.Items | Sort-Object Left | ForEach-Object { $_.Text }) -join '')
   }
   return ,$lines
-}
-
-function ConvertTo-Json-Lines($lines) {
-  return (@{ text = (@($lines) -join "`n"); lines = @($lines) } | ConvertTo-Json -Compress -Depth 3)
 }
 
 # 抓取一块屏幕区域（物理像素），$Masks 是 4 个一组的「要涂黑的矩形」，可省略
@@ -272,7 +307,18 @@ while ($true) {
         if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
         if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
         $lines = Get-Lines-From-Bitmap $bmp
-        Write-Line (ConvertTo-Json-Lines $lines)
+        # 第一遍结果里混进半角字母/数字，基本就是认错假名了：再用灰度增强版复核一次。
+        # 正常日文台词不跑第二遍，避免长文本识别时间翻倍。
+        $joined = (@($lines) -join '')
+        $alt = @()
+        if ($joined -match '[A-Za-z0-9]') {
+          try { $alt = Get-Lines-From-Bitmap $bmp -Enhanced } catch { $alt = @() }
+        }
+        Write-Line (@{
+          text = (@($lines) -join "`n")
+          lines = @($lines)
+          alt = @($alt)
+        } | ConvertTo-Json -Compress -Depth 3)
       } finally {
         $bmp.Dispose()
       }
@@ -281,7 +327,16 @@ while ($true) {
       try {
         $bmp = [System.Drawing.Bitmap]::FromFile($line)
         $lines = Get-Lines-From-Bitmap $bmp
-        Write-Line (ConvertTo-Json-Lines $lines)
+        $joined = (@($lines) -join '')
+        $alt = @()
+        if ($joined -match '[A-Za-z0-9]') {
+          try { $alt = Get-Lines-From-Bitmap $bmp -Enhanced } catch { $alt = @() }
+        }
+        Write-Line (@{
+          text = (@($lines) -join "`n")
+          lines = @($lines)
+          alt = @($alt)
+        } | ConvertTo-Json -Compress -Depth 3)
       } finally {
         if ($bmp) { $bmp.Dispose() }
       }
