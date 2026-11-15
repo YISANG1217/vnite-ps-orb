@@ -22,6 +22,7 @@
   const listHead = root.querySelector('.list-head');
   const listEl = root.querySelector('.list');
   const launchLayer = root.querySelector('.launch');
+  const settingsEl = root.querySelector('.settings');
   const openButton = root.querySelector('[data-act="open"]');
   const hideButton = root.querySelector('[data-act="hide"]');
 
@@ -313,6 +314,7 @@
     Promise.resolve(api.collapse()).then(applyLayout).catch(() => {});
     window.setTimeout(() => {
       panel.hidden = true;
+      panel.dataset.view = 'games';
       launchLayer.hidden = true;
       state.closing = false;
       syncIgnore();
@@ -325,9 +327,74 @@
     state.launching = false;
     panel.classList.remove('is-open');
     panel.hidden = true;
+    panel.dataset.view = 'games';
     launchLayer.hidden = true;
     syncIgnore();
   }
+
+  // ————— 设置视图 —————
+  function showView(view) {
+    panel.dataset.view = view;
+    if (view === 'settings') syncSettings();
+  }
+
+  function syncSettings() {
+    settingsEl.querySelectorAll('[data-key="size"] button').forEach(button => {
+      button.classList.toggle('is-on', Number(button.dataset.value) === state.size);
+    });
+    settingsEl.querySelectorAll('[data-key="accent"] button').forEach(button => {
+      button.classList.toggle('is-on', button.dataset.value === root.dataset.accent);
+    });
+    const soundSwitch = settingsEl.querySelector('[data-key="sound"]');
+    soundSwitch.classList.toggle('is-on', state.sound);
+    soundSwitch.setAttribute('aria-checked', String(state.sound));
+  }
+
+  async function setOption(key, value) {
+    try {
+      const payload = await api.setOption(key, value);
+      if (payload) applyLayout(payload);
+    } catch (error) {
+      setStatus('设置保存失败', 'error');
+    }
+    syncSettings();
+  }
+
+  async function openSettings() {
+    if (!state.expanded) await expand();
+    showView('settings');
+  }
+
+  settingsEl.addEventListener('click', event => {
+    if (event.target.closest('.settings-back')) {
+      play('back');
+      showView('games');
+      return;
+    }
+    const sizeButton = event.target.closest('[data-key="size"] button');
+    if (sizeButton) {
+      const size = Number(sizeButton.dataset.value);
+      if (size !== state.size) {
+        play('tap');
+        setOption('size', size);
+      }
+      return;
+    }
+    const accentButton = event.target.closest('[data-key="accent"] button');
+    if (accentButton) {
+      play('tap');
+      setOption('accent', accentButton.dataset.value);
+      return;
+    }
+    if (event.target.closest('[data-key="sound"]')) {
+      const next = !state.sound;
+      if (next) {
+        state.sound = true;
+        play('tap');
+      }
+      setOption('sound', next);
+    }
+  });
 
   // ————— 操作 —————
   async function launch(game) {
@@ -475,6 +542,9 @@
   api.onForceExpand(() => {
     if (!state.expanded) expand();
   });
+  api.onOpenSettings(() => {
+    openSettings();
+  });
 
   async function init() {
     try {
@@ -530,10 +600,12 @@
       launch: async () => ({ ok: true }),
       openVnite: async () => true,
       hide: async () => true,
+      setOption: async (key, value) => ({ ...base, [key === 'size' ? 'orbSize' : key]: value }),
       onLayout: () => {},
       onBlur: () => {},
       onForceCollapse: () => {},
-      onForceExpand: () => {}
+      onForceExpand: () => {},
+      onOpenSettings: () => {}
     };
   }
 })();

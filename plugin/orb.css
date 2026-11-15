@@ -683,6 +683,173 @@ body {
   color: #ffb8b8;
 }
 
+/* 设置视图 */
+
+.settings {
+  display: none;
+}
+
+.panel[data-view="settings"] .settings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel[data-view="settings"] :is(.panel-status, .hero, .panel-empty, .list-head, .list, .panel-foot) {
+  display: none;
+}
+
+.settings-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.settings-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: rgba(220, 232, 248, 0.82);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.settings-back svg {
+  width: 12px;
+  height: 12px;
+}
+
+.settings-back:hover {
+  background: rgba(91, 157, 255, 0.14);
+  border-color: rgba(140, 190, 255, 0.3);
+  color: #f2f8ff;
+}
+
+.settings-title {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: rgba(190, 210, 238, 0.44);
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.setting-label {
+  font-size: 12px;
+  color: rgba(236, 244, 255, 0.82);
+}
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.segmented button {
+  min-width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: rgba(220, 232, 248, 0.6);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.segmented button:hover {
+  color: #f2f8ff;
+}
+
+.segmented button.is-on {
+  color: #06101f;
+  background: color-mix(in srgb, var(--accent) 82%, #ffffff);
+}
+
+.swatches {
+  display: flex;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.swatches button {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.swatches button[data-value="blue"] {
+  background: #5b9dff;
+}
+
+.swatches button[data-value="violet"] {
+  background: #9a7bff;
+}
+
+.swatches button[data-value="cyan"] {
+  background: #4fd9d9;
+}
+
+.swatches button:hover {
+  transform: scale(1.08);
+}
+
+.swatches button.is-on {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  transition: background 0.18s ease;
+}
+
+.switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(226, 238, 255, 0.72);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.28, 1), background 0.18s ease;
+}
+
+.switch.is-on {
+  background: color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+.switch.is-on i {
+  transform: translateX(16px);
+  background: #ffffff;
+}
+
+.settings-hint {
+  margin: 12px 2px 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: rgba(190, 210, 238, 0.4);
+}
+
 /* 启动遮罩 */
 
 .launch {

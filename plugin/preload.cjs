@@ -16,8 +16,12 @@ contextBridge.exposeInMainWorld('psOrb', {
   launch: id => ipcRenderer.invoke(channel('launch'), id),
   openVnite: () => ipcRenderer.invoke(channel('open-vnite')),
   hide: () => ipcRenderer.invoke(channel('hide')),
+  setOption: (key, value) => ipcRenderer.invoke(channel('set-option'), key, value),
   onLayout: callback => {
     ipcRenderer.on(channel('layout'), (_event, payload) => callback(payload));
+  },
+  onOpenSettings: callback => {
+    ipcRenderer.on(channel('open-settings'), () => callback());
   },
   onBlur: callback => {
     ipcRenderer.on(channel('blur'), () => callback());

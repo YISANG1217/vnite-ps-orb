@@ -28,10 +28,12 @@ const CHANNELS = {
   openVnite: `${pluginId}:open-vnite`,
   hide: `${pluginId}:hide`,
   blur: `${pluginId}:blur`,
-  forceCollapse: `${pluginId}:force-collapse`
+  forceCollapse: `${pluginId}:force-collapse`,
+  setOption: `${pluginId}:set-option`,
+  openSettings: `${pluginId}:open-settings`
 };
 
-const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide'];
+const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide', 'setOption'];
 const LISTEN_CHANNELS = ['dragStart', 'dragMove', 'dragEnd', 'setIgnore', 'contextMenu'];
 
 const OPTION_DEFAULTS = Object.fromEntries(
@@ -190,18 +192,15 @@ async function activate(api) {
     return true;
   }
 
-  // 打开 Vnite 的插件设置页（TanStack Router 实例挂在 window.__TSR_ROUTER__）。
-  function openPluginSettings() {
-    const target = findVniteWindow();
-    if (!target) return;
-    if (target.isMinimized()) target.restore();
-    target.show();
-    target.focus();
-    target.webContents
-      .executeJavaScript(
-        "if (window.__TSR_ROUTER__) { window.__TSR_ROUTER__.navigate({ to: '/plugin' }); } void 0"
-      )
-      .catch(() => {});
+  // 让面板切到设置视图，所有改动都直接写回插件配置。
+  function openSettingsPanel() {
+    if (!win || win.isDestroyed()) return;
+    // 延后一拍：先让原生菜单完成关闭，再把焦点交回悬浮球面板
+    setTimeout(() => {
+      if (!win || win.isDestroyed()) return;
+      win.focus();
+      send(CHANNELS.openSettings);
+    }, 0);
   }
 
   function hideFloating() {
@@ -250,7 +249,7 @@ async function activate(api) {
       },
       {
         label: '设置',
-        click: openPluginSettings
+        click: openSettingsPanel
       },
       {
         label: '重置位置',
@@ -486,6 +485,22 @@ async function activate(api) {
     checkSender(event);
     hideFloating();
     return true;
+  });
+
+  const OPTION_KEYS = new Set(['size', 'accent', 'sound']);
+
+  // 面板里的设置项：写回插件配置，立即生效
+  ipcMain.handle(CHANNELS.setOption, async (event, key, value) => {
+    checkSender(event);
+    if (!OPTION_KEYS.has(key)) return layoutPayload({ sound });
+    try {
+      await api.PluginDB.setValue(key, key === 'sound' ? Boolean(value) : String(value));
+    } catch (error) {
+      console.warn('[PS 悬浮球] 保存设置失败', error);
+    }
+    applyOptions(await readPreferences());
+    placeWindow();
+    return layoutPayload({ sound });
   });
 
   function toggleVisible() {

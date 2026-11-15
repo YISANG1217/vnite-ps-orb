@@ -77,6 +77,41 @@
         <button type="button" data-act="hide">隐藏悬浮球</button>
       </footer>
 
+      <section class="settings">
+        <div class="settings-top">
+          <button class="settings-back" type="button" aria-label="返回最近游玩">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.6 3.2 4.8 8l4.8 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>返回</span>
+          </button>
+          <span class="settings-title">设置 · SETTINGS</span>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">悬浮球大小</span>
+          <div class="segmented" data-key="size">
+            <button type="button" data-value="52">小</button>
+            <button type="button" data-value="64">中</button>
+            <button type="button" data-value="76">大</button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">强调色</span>
+          <div class="swatches" data-key="accent">
+            <button type="button" data-value="blue" aria-label="蓝色"></button>
+            <button type="button" data-value="violet" aria-label="紫色"></button>
+            <button type="button" data-value="cyan" aria-label="青色"></button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <span class="setting-label">界面音效</span>
+          <button class="switch" type="button" data-key="sound" role="switch" aria-checked="true"><i></i></button>
+        </div>
+
+        <p class="settings-hint">大小、配色与音效会立即生效，并同步到 Vnite 插件设置。</p>
+      </section>
+
       <div class="launch" hidden>
         <span class="launch-ring" aria-hidden="true"></span>
         <b>正在启动</b>
