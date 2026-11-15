@@ -128,6 +128,7 @@
   function endDrag() {
     if (!dragging) return;
     dragging = false;
+    document.documentElement.classList.remove('is-dragging');
     cardEl?.classList.remove('is-dragging');
     api.studyDragEnd();
   }
@@ -152,6 +153,7 @@
       if (event.clientX > rect.right - 14) return;
     }
     dragging = true;
+    document.documentElement.classList.add('is-dragging');
     cardEl.classList.add('is-dragging');
     cardEl.setPointerCapture(event.pointerId);
     api.studyDragStart();
