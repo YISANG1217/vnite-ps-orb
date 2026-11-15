@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, MenuItem, Tray } = require('electron');
 const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { id: pluginId, configuration } = require('./manifest.json');
@@ -10,6 +10,7 @@ const GAP = 16;
 const PANEL_W = 344;
 const PANEL_H = 452;
 const EDGE = 8;
+const TRAY_ITEM_ID = `${pluginId}:tray-toggle`;
 
 const CHANNELS = {
   bootstrap: `${pluginId}:bootstrap`,
@@ -392,6 +393,7 @@ async function activate(api) {
       win.setIgnoreMouseEvents(true, { forward: true });
       win.hide();
     }
+    refreshTrayMenu();
     return true;
   });
 
@@ -404,6 +406,98 @@ async function activate(api) {
     } else {
       revealWindow();
     }
+    refreshTrayMenu();
+  }
+
+  // ————— Vnite 托盘菜单入口 —————
+  // 悬浮球隐藏后没有窗口可点，除了 Ctrl+Alt+P，还在 Vnite 托盘菜单里挂一项「显示/隐藏悬浮球」。
+  // 托盘菜单由 Vnite 每次重建，这里钩住 Tray.setContextMenu 在菜单末尾插一项。
+  let trayRetry = null;
+  let trayRetries = 0;
+
+  function trayLabel() {
+    return win && !win.isDestroyed() && win.isVisible() ? '隐藏悬浮球' : '显示悬浮球';
+  }
+
+  function findTrayManager() {
+    try {
+      for (const mod of Object.values(require.cache)) {
+        const manager = mod?.exports?.trayManager;
+        if (manager && manager.tray) return manager;
+      }
+    } catch {
+      /* 读取模块缓存失败时退化为等待 Vnite 自己重建菜单 */
+    }
+    return null;
+  }
+
+  function refreshTrayMenu() {
+    const manager = findTrayManager();
+    if (!manager || typeof manager.setTrayMenu !== 'function') return false;
+    Promise.resolve(manager.setTrayMenu()).catch(() => {});
+    return true;
+  }
+
+  function decorateTrayMenu(menu) {
+    if (!menu || !Array.isArray(menu.items)) return;
+    if (menu.items.some(item => item.id === TRAY_ITEM_ID)) return;
+    const item = new MenuItem({
+      id: TRAY_ITEM_ID,
+      label: trayLabel(),
+      // 延后一拍：避免在原生菜单点击回调里立刻重建托盘菜单
+      click: () => setTimeout(toggleVisible, 0)
+    });
+    // 放在最后一条分隔线之前：设置 → 显示悬浮球 ── 退出
+    let insertAt = menu.items.length;
+    for (let index = menu.items.length - 1; index >= 0; index -= 1) {
+      if (menu.items[index].type === 'separator') {
+        insertAt = index;
+        break;
+      }
+    }
+    menu.insert(insertAt, item);
+  }
+
+  function installTrayEntry() {
+    try {
+      const proto = Tray.prototype;
+      if (!proto.__psOrbSetContextMenu) {
+        const original = proto.setContextMenu;
+        proto.__psOrbSetContextMenu = original;
+        proto.setContextMenu = function patchedSetContextMenu(menu) {
+          try {
+            decorateTrayMenu(menu);
+          } catch (error) {
+            console.warn('[PS 悬浮球] 注入托盘菜单失败', error);
+          }
+          return original.call(this, menu);
+        };
+      }
+    } catch (error) {
+      console.warn('[PS 悬浮球] 托盘菜单不可用', error);
+      return;
+    }
+    // 托盘在插件启用前就已创建，主动重建一次让入口立刻出现。
+    if (!refreshTrayMenu() && trayRetries < 3) {
+      trayRetries += 1;
+      trayRetry = setTimeout(installTrayEntry, trayRetries * 1500);
+    }
+  }
+
+  function removeTrayEntry() {
+    if (trayRetry) clearTimeout(trayRetry);
+    trayRetry = null;
+    try {
+      const proto = Tray.prototype;
+      const original = proto.__psOrbSetContextMenu;
+      if (original) {
+        delete proto.__psOrbSetContextMenu;
+        proto.setContextMenu = original;
+      }
+    } catch {
+      /* 忽略 */
+    }
+    refreshTrayMenu();
   }
 
   const hotkeyEnabled = initialPreferences?.hotkey !== false;
@@ -428,7 +522,10 @@ async function activate(api) {
   screen.on('display-metrics-changed', onDisplayChange);
   screen.on('display-removed', onDisplayChange);
 
+  installTrayEntry();
+
   dispose = async () => {
+    removeTrayEntry();
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);
     globalShortcut.unregister('Control+Alt+P');
