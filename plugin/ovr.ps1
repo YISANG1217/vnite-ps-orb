@@ -53,8 +53,8 @@ if (-not $engine) {
   exit 1
 }
 
-$SAMPLE_STEP = 12
-$DIFF_THRESHOLD = 0.012
+$SAMPLE_STEP = 8
+$DIFF_THRESHOLD = 0.004
 $lastSamples = $null
 $skipCount = 0
 
@@ -228,18 +228,10 @@ function Test-FrameChange($bmp) {
   # 独占全屏 / 受保护画面会抓成纯黑，交给主进程回落到系统截图
   if ($max -lt 24) { return 'black' }
   $diff = Compare-Signature $script:lastSamples $signature
-  if ($diff -lt 0.0008) {
+  if ($diff -lt 0.0012) {
     # 完全没变：直接跳过，不做任何识别
     $script:skipCount = 0
     return 'skip'
-  }
-  if ($diff -lt $DIFF_THRESHOLD) {
-    # 变化太小先跳过，但最多跳两次：再小的变化也强制识别一帧，
-    # 否则「翻页后只有一小行字变了」会永远触发不了
-    if ($script:skipCount -lt 2) {
-      $script:skipCount++
-      return 'skip'
-    }
   }
   $script:skipCount = 0
   $script:lastSamples = $signature

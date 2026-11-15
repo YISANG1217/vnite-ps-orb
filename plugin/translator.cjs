@@ -745,8 +745,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let captureFailures = 0;
 
   const SIGNATURE_WIDTH = 48;
-  const DIFF_THRESHOLD = 0.035;
-  const OCR_COOLDOWN = 520;
+  const DIFF_THRESHOLD = 0.012;
+  const OCR_COOLDOWN = 380;
 
   function coarseSignature(image) {
     const size = image.getSize();
@@ -799,7 +799,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   }
 
   // ————— 文本去抖：同一句被识别成两个版本时字幕不要来回跳 —————
-  let pendingText = '';
 
   const SKELETON_RE = /[\s\p{P}\p{S}]/gu;
 
@@ -826,34 +825,15 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   }
 
   // 同一句的两种识别结果差异很小 → 忽略，保留先显示的那次
-  // 完全不同的文本要连续出现两次才上屏，避免闪一下乱码又跳回来
   function acceptText(text) {
     if (!text) return undefined;
-    if (text === lastText) {
-      pendingText = '';
-      return undefined;
-    }
+    if (text === lastText) return undefined;
     const a = skeleton(lastText);
     const b = skeleton(text);
-    if (a && b) {
-      if (a === b) return undefined;
-      if (1 - editDistance(a, b) / Math.max(a.length, b.length) >= 0.82) return undefined;
-    }
-    if (!lastText) {
-      pendingText = '';
-      return deliver(text);
-    }
-    if (pendingText && skeleton(pendingText) === b) {
-      pendingText = '';
-      return deliver(text);
-    }
-    // 长句直接上屏：大图识别本来就慢，再等一帧会让延迟翻倍
-    if (b.length >= 16) {
-      pendingText = '';
-      return deliver(text);
-    }
-    pendingText = text;
-    return undefined;
+    // 只把「同一句的识别抖动」当成重复：改一两个字相似度仍在 0.9 以上。
+    // 以前用 0.82，会把「そうか」→「そうかよ」这种正常换行也吞掉，看起来就是漏行。
+    if (a && b && 1 - editDistance(a, b) / Math.max(a.length, b.length) >= 0.9) return undefined;
+    return deliver(text);
   }
 
   // 子进程直接抓屏：只在主屏上启用，坐标才能和物理像素一一对应
@@ -991,7 +971,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     lastSignature = null;
     lastText = '';
     lastTranslated = '';
-    pendingText = '';
     idleTicks = 0;
     failures = 0;
     captureFailures = 0;
@@ -1176,7 +1155,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         stopOcr();
         lastSignature = null;
         lastText = '';
-        pendingText = '';
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);
