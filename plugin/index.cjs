@@ -190,6 +190,20 @@ async function activate(api) {
     return true;
   }
 
+  // 打开 Vnite 的插件设置页（TanStack Router 实例挂在 window.__TSR_ROUTER__）。
+  function openPluginSettings() {
+    const target = findVniteWindow();
+    if (!target) return;
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+    target.webContents
+      .executeJavaScript(
+        "if (window.__TSR_ROUTER__) { window.__TSR_ROUTER__.navigate({ to: '/plugin' }); } void 0"
+      )
+      .catch(() => {});
+  }
+
   function hideFloating() {
     expanded = false;
     if (win && !win.isDestroyed()) {
@@ -233,6 +247,10 @@ async function activate(api) {
         click: () => {
           showVniteWindow();
         }
+      },
+      {
+        label: '设置',
+        click: openPluginSettings
       },
       {
         label: '重置位置',
