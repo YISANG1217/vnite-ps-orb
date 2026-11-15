@@ -19,6 +19,13 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name 'Dpi' -Namespace 'PsOrb'
 [PsOrb.Dpi]::SetProcessDPIAware() | Out-Null
 
+# 识别进程降为低于正常优先级：OCR 的那一下不会和游戏抢 CPU，鼠标就不会顿
+try {
+  [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+} catch {
+  # 设置失败不影响识别
+}
+
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime]
 $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType=WindowsRuntime]
@@ -78,6 +85,25 @@ function Compare-Signature($a, $b) {
     if ([Math]::Abs($a[$i] - $b[$i]) -gt 60) { $changed++ }
   }
   return [double]$changed / $a.Length
+}
+
+# 识别前先把大图缩小：像素少一半，OCR 时间也差不多少一半
+function Get-OcrBitmap($bmp) {
+  $maxWidth = 1100
+  if ($bmp.Width -le $maxWidth) { return $bmp }
+  $ratio = $maxWidth / $bmp.Width
+  $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $ratio))
+  $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $ratio))
+  $scaled = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($scaled)
+  try {
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.DrawImage($bmp, 0, 0, $w, $h)
+  } finally {
+    $g.Dispose()
+  }
+  return $scaled
 }
 
 function Get-Lines($stream) {
@@ -142,10 +168,11 @@ while ($true) {
         }
         $lastSamples = $signature
 
+        $ocrBmp = Get-OcrBitmap $bmp
         $ms = New-Object System.IO.MemoryStream
         $stream = $null
         try {
-          $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
+          $ocrBmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
           $ms.Position = 0
           $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
           $lines = Get-Lines $stream
@@ -153,6 +180,7 @@ while ($true) {
         } finally {
           if ($stream) { $stream.Dispose() }
           $ms.Dispose()
+          if (-not [object]::ReferenceEquals($ocrBmp, $bmp)) { $ocrBmp.Dispose() }
         }
       } finally {
         $bmp.Dispose()

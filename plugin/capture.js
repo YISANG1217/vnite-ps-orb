@@ -67,10 +67,13 @@
   }
 
   async function send(rect) {
-    grabber.width = rect.width;
-    grabber.height = rect.height;
+    // 识别不需要原始分辨率，缩到 1100 宽以内，OCR 更快也不会明显掉精度
+    const width = Math.min(rect.width, 1100);
+    const height = Math.max(8, Math.round(rect.height * (width / Math.max(1, rect.width))));
+    grabber.width = width;
+    grabber.height = height;
     const ctx = grabber.getContext('2d', { alpha: false });
-    ctx.drawImage(video, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    ctx.drawImage(video, rect.x, rect.y, rect.width, rect.height, 0, 0, width, height);
     const blob = await new Promise(resolve => grabber.toBlob(resolve, 'image/jpeg', 0.92));
     if (!blob) return;
     const buffer = new Uint8Array(await blob.arrayBuffer());

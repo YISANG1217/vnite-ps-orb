@@ -27,6 +27,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     original: true,
     interval: 1000,
     study: false,
+    stream: false,
     region: null
   };
 
@@ -68,6 +69,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.fontSize = Number.isFinite(fontSize) ? clamp(fontSize, 14, 40) : 22;
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
+    cfg.stream = preferences?.translateStream === true;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
   }
@@ -585,8 +587,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = setTimeout(tick, delay);
   }
 
-  // 默认走持续画面流；流不可用时依次回落到子进程抓屏、系统截图
-  let captureMode = 'stream';
+  // 默认用子进程 GDI 抓屏（不会触发 Windows 的屏幕捕获提示）；
+  // 想省 CPU 可打开「系统画面流」，但系统会在屏幕顶部显示捕获提示条
+  let captureMode = 'gdi';
   let captureFailures = 0;
 
   const SIGNATURE_WIDTH = 48;
@@ -752,12 +755,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     if (cfg.region) {
       startOcr();
-      captureMode = 'stream';
+      captureMode = cfg.stream ? 'stream' : 'gdi';
       lastFrameAt = 0;
-      startCaptureStream().catch(error => {
-        console.warn('[PS 悬浮球] 启动画面流失败', error?.message || error);
-        captureMode = 'gdi';
-      });
+      if (cfg.stream) {
+        startCaptureStream().catch(error => {
+          console.warn('[PS 悬浮球] 启动画面流失败', error?.message || error);
+          captureMode = 'gdi';
+        });
+      }
       schedule(120);
     }
     refreshTray();
@@ -876,7 +881,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         fontSize: cfg.fontSize,
         original: cfg.original,
         interval: cfg.interval,
-        study: cfg.study
+        study: cfg.study,
+        stream: cfg.stream
       };
       applyConfig(preferences);
       if (before.lang !== cfg.lang) {
@@ -886,6 +892,18 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);
+      if (before.stream !== cfg.stream && running) {
+        // 切换取画方式：关掉画面流（避免系统捕获提示常驻），按新方式重来
+        stopCaptureStream();
+        captureMode = cfg.stream ? 'stream' : 'gdi';
+        lastSignature = null;
+        lastOcrAt = 0;
+        if (cfg.stream) {
+          startCaptureStream().catch(() => {
+            captureMode = 'gdi';
+          });
+        }
+      }
       if (before.study !== cfg.study) {
         if (cfg.study) {
           analyzer.warmup();

@@ -117,12 +117,13 @@ body {
   position: absolute;
   inset: -9%;
   border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 42%, transparent) 0%, transparent 64%);
-  filter: blur(6px);
+  /* 径向渐变本身就是柔边，去掉 filter: blur()：透明置顶窗口里每帧重新模糊很吃 GPU */
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 42%, transparent) 0%, color-mix(in srgb, var(--accent) 12%, transparent) 42%, transparent 68%);
   opacity: 0.45;
   animation: orbBreathe 4.6s ease-in-out infinite;
   pointer-events: none;
   transition: opacity 0.3s ease, transform 0.3s ease;
+  will-change: opacity, transform;
 }
 
 .orb:hover .orb-halo {

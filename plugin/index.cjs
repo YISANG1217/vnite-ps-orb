@@ -757,7 +757,7 @@ async function activate(api) {
     }
   }
 
-  prefsTimer = setInterval(syncPreferences, 1200);
+  prefsTimer = setInterval(syncPreferences, 2500);
 
   dispose = async () => {
     clearInterval(prefsTimer);
