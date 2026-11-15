@@ -86,6 +86,7 @@
   }
 
   function render(payload) {
+    if (bodyEl) bodyEl.scrollTop = 0;
     renderSentence(payload.tokens || []);
     renderChunks(payload.chunks || []);
     renderWords(payload.tokens || []);
@@ -105,8 +106,9 @@
   }
 
   // ————— 拖动 / 缩放 —————
-  // 整个面板按住就能拖；右下角折角用来缩放
+  // 整个面板按住就能拖；右下角折角用来缩放；内容区可以滚动
   const cardEl = document.querySelector('.card');
+  const bodyEl = document.getElementById('body');
   const gripEl = document.getElementById('grip');
 
   let dragging = false;
@@ -136,6 +138,11 @@
       };
       cardEl.setPointerCapture(event.pointerId);
       return;
+    }
+    // 贴着内容区右边缘的那条是滚动条，不要当成拖动
+    if (bodyEl) {
+      const rect = bodyEl.getBoundingClientRect();
+      if (event.clientX > rect.right - 14) return;
     }
     dragging = true;
     cardEl.classList.add('is-dragging');

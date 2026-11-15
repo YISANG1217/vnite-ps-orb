@@ -2,7 +2,7 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。内置实时翻译字幕：框选游戏文字区域，OCR 识别并翻译成中文显示在屏幕底部。",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",

@@ -80,12 +80,49 @@ body {
   color: var(--faint);
 }
 
+.card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+  cursor: grab;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(206, 224, 250, 0.3) transparent;
+}
+
+.card-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.card-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.card-body::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(206, 224, 250, 0.3);
+}
+
+.card-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(206, 224, 250, 0.5);
+}
+
 .block {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
+}
+
+.card-body .block:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .block h3 {
