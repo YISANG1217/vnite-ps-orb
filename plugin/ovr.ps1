@@ -2,6 +2,8 @@
 
 # 常驻的 Windows OCR 助手：从 stdin 逐行读取命令，输出一行 JSON。
 #   cap <x> <y> <w> <h>   直接抓取屏幕区域并识别（物理像素坐标，GDI 截图）
+#   grab "<png路径>" <x> <y> <w> <h>
+#                          只抓图不识别，存成 PNG 并返回 {file,width,height}（给 PaddleOCR 用）
 #   <图片路径>            识别已有图片（系统截图回落路径）
 # 截图放在子进程里做：主进程不再周期性抓全屏、不写临时文件，鼠标才不会隔几秒卡一下。
 # 注意：必须自己写 UTF-8 字节，PowerShell 5.1 直接 Write-Output 会变成 UTF-16。
@@ -189,6 +191,80 @@ function ConvertTo-Json-Lines($lines) {
   return (@{ text = (@($lines) -join "`n"); lines = @($lines) } | ConvertTo-Json -Compress -Depth 3)
 }
 
+# 抓取一块屏幕区域（物理像素），$Masks 是 4 个一组的「要涂黑的矩形」，可省略
+function Get-CaptureBitmap([int]$cx, [int]$cy, [int]$cw, [int]$ch, $Masks) {
+  $bmp = New-Object System.Drawing.Bitmap($cw, $ch, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  try {
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+      $g.CopyFromScreen($cx, $cy, 0, 0, (New-Object System.Drawing.Size($cw, $ch)), [System.Drawing.CopyPixelOperation]::SourceCopy)
+      if ($Masks -and $Masks.Count -ge 4) {
+        $full = New-Object System.Drawing.Rectangle(0, 0, $cw, $ch)
+        for ($i = 0; $i + 3 -lt $Masks.Count; $i += 4) {
+          $maskX = [int]$Masks[$i] - $cx
+          $maskY = [int]$Masks[$i + 1] - $cy
+          $maskR = New-Object System.Drawing.Rectangle($maskX, $maskY, [int]$Masks[$i + 2], [int]$Masks[$i + 3])
+          $hit = [System.Drawing.Rectangle]::Intersect($maskR, $full)
+          if ($hit.Width -gt 0 -and $hit.Height -gt 0) {
+            $g.FillRectangle([System.Drawing.Brushes]::Black, $hit)
+          }
+        }
+      }
+    } finally {
+      $g.Dispose()
+    }
+    return $bmp
+  } catch {
+    $bmp.Dispose()
+    throw
+  }
+}
+
+# 画面指纹比对：ok / skip / black。$lastSamples、$skipCount 属于脚本作用域
+function Test-FrameChange($bmp) {
+  $signature = Get-Signature $bmp
+  $max = 0
+  foreach ($v in $signature) { if ($v -gt $max) { $max = $v } }
+  # 独占全屏 / 受保护画面会抓成纯黑，交给主进程回落到系统截图
+  if ($max -lt 24) { return 'black' }
+  $diff = Compare-Signature $script:lastSamples $signature
+  if ($diff -lt 0.0008) {
+    # 完全没变：直接跳过，不做任何识别
+    $script:skipCount = 0
+    return 'skip'
+  }
+  if ($diff -lt $DIFF_THRESHOLD) {
+    # 变化太小先跳过，但最多跳两次：再小的变化也强制识别一帧，
+    # 否则「翻页后只有一小行字变了」会永远触发不了
+    if ($script:skipCount -lt 2) {
+      $script:skipCount++
+      return 'skip'
+    }
+  }
+  $script:skipCount = 0
+  $script:lastSamples = $signature
+  return 'ok'
+}
+
+# 解析 "x y w h [mask...]" 参数
+function ConvertTo-CaptureArgs($parts) {
+  if ($parts.Count -lt 4 -or (($parts.Count - 4) % 4) -ne 0) { return $null }
+  $result = @{
+    X = [int]$parts[0]
+    Y = [int]$parts[1]
+    W = [int]$parts[2]
+    H = [int]$parts[3]
+    Masks = @()
+  }
+  if ($result.W -lt 8 -or $result.H -lt 8) { return $null }
+  if ($parts.Count -ge 8) {
+    $masks = @()
+    for ($i = 4; $i -lt $parts.Count; $i++) { $masks += [int]$parts[$i] }
+    $result.Masks = $masks
+  }
+  return $result
+}
+
 Write-Line '{"ready":true}'
 
 while ($true) {
@@ -198,64 +274,33 @@ while ($true) {
   if ($line -eq '') { continue }
   try {
     if ($line.StartsWith('cap ')) {
-      $parts = ($line.Substring(4).Trim()) -split '\s+'
-      if ($parts.Count -lt 4 -or (($parts.Count - 4) % 4) -ne 0) { Write-Line '{"error":"bad-capture-args"}'; continue }
-      $cx = [int]$parts[0]
-      $cy = [int]$parts[1]
-      $cw = [int]$parts[2]
-      $ch = [int]$parts[3]
-      if ($cw -lt 8 -or $ch -lt 8) { Write-Line '{"error":"bad-capture-args"}'; continue }
-
-      $bmp = New-Object System.Drawing.Bitmap($cw, $ch, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+      $cap = ConvertTo-CaptureArgs (($line.Substring(4).Trim()) -split '\s+')
+      if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
+      $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
       try {
-        $g = [System.Drawing.Graphics]::FromImage($bmp)
-        try {
-          $g.CopyFromScreen($cx, $cy, 0, 0, (New-Object System.Drawing.Size($cw, $ch)), [System.Drawing.CopyPixelOperation]::SourceCopy)
-          # 参数后半段是「要涂黑的矩形」：字幕条 / 伴学面板自己显示的内容，
-          # 不能让它进入识别，否则会自我循环，字幕在两种译文之间来回跳
-          if ($parts.Count -ge 8) {
-            $full = New-Object System.Drawing.Rectangle(0, 0, $cw, $ch)
-            for ($i = 4; $i + 3 -lt $parts.Count; $i += 4) {
-              $maskX = [int]$parts[$i] - $cx
-              $maskY = [int]$parts[$i + 1] - $cy
-              $maskR = New-Object System.Drawing.Rectangle($maskX, $maskY, [int]$parts[$i + 2], [int]$parts[$i + 3])
-              $hit = [System.Drawing.Rectangle]::Intersect($maskR, $full)
-              if ($hit.Width -gt 0 -and $hit.Height -gt 0) {
-                $g.FillRectangle([System.Drawing.Brushes]::Black, $hit)
-              }
-            }
-          }
-        } finally {
-          $g.Dispose()
-        }
-
-        $signature = Get-Signature $bmp
-        $max = 0
-        foreach ($v in $signature) { if ($v -gt $max) { $max = $v } }
-        # 独占全屏 / 受保护画面会抓成纯黑，交给主进程回落到系统截图
-        if ($max -lt 24) { Write-Line '{"error":"capture-black"}'; continue }
-
-        $diff = Compare-Signature $lastSamples $signature
-        if ($diff -lt 0.0008) {
-          # 完全没变：直接跳过，不做任何识别
-          $skipCount = 0
-          Write-Line '{"skip":true}'
-          continue
-        }
-        if ($diff -lt $DIFF_THRESHOLD) {
-          # 变化太小先跳过，但最多跳两次：再小的变化也强制识别一帧，
-          # 否则「翻页后只有一小行字变了」会永远触发不了
-          if ($skipCount -lt 2) {
-            $skipCount++
-            Write-Line '{"skip":true}'
-            continue
-          }
-        }
-        $skipCount = 0
-        $lastSamples = $signature
-
+        $state = Test-FrameChange $bmp
+        if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
+        if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
         $lines = Get-Lines-From-Bitmap $bmp
         Write-Line (ConvertTo-Json-Lines $lines)
+      } finally {
+        $bmp.Dispose()
+      }
+    } elseif ($line.StartsWith('grab ')) {
+      # grab "<png 路径>" x y w h [mask...]：只抓图不识别，交给主进程的 PaddleOCR。
+      # 路径加引号，避免用户名里有空格时参数错位。
+      $match = [regex]::Match($line, '^grab\s+"([^"]+)"\s+(.+)$')
+      if (-not $match.Success) { Write-Line '{"error":"bad-grab-args"}'; continue }
+      $cap = ConvertTo-CaptureArgs ($match.Groups[2].Value.Trim() -split '\s+')
+      if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
+      $target = $match.Groups[1].Value
+      $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
+      try {
+        $state = Test-FrameChange $bmp
+        if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
+        if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
+        $bmp.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+        Write-Line (@{ file = $target; width = $cap.W; height = $cap.H } | ConvertTo-Json -Compress)
       } finally {
         $bmp.Dispose()
       }
