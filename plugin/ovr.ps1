@@ -88,14 +88,15 @@ function Compare-Signature($a, $b) {
   return [double]$changed / $a.Length
 }
 
-# 识别前只做一件事：太宽才缩（上限 1600），保持原始清晰度。
-# 实测：缩小、灰度化、加对比度都会明显掉字，尤其是日文彩色对话框上的浅色字。
+# 识别前把画面放大 1.5 倍（上限 2400px）。实测这一档对「、」这类小标点
+# 和假名连写的识别明显更准；再往外缩或加灰度、对比度都会掉字。
 function Get-OcrBitmap($bmp) {
-  $maxWidth = 1600
-  if ($bmp.Width -le $maxWidth) { return $bmp }
-  $ratio = $maxWidth / $bmp.Width
-  $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $ratio))
-  $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $ratio))
+  $maxWidth = 2400
+  $scale = [Math]::Min(1.5, $maxWidth / [Math]::Max(1, $bmp.Width))
+  if ($bmp.Width -le $maxWidth) { $scale = [Math]::Max(1.0, $scale) }
+  if ($scale -eq 1.0) { return $bmp }
+  $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $scale))
+  $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $scale))
   $scaled = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($scaled)
   try {

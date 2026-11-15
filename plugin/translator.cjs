@@ -502,6 +502,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   function showStudy(payload) {
     if (!cfg.study) return;
     const win = createStudy();
+    // 每次显示前再确认一次可点击，避免任何情况下残留穿透状态
+    win.setIgnoreMouseEvents(false);
     win.webContents.send(CH.study, payload);
     placeStudy();
     if (!win.isVisible()) win.showInactive();

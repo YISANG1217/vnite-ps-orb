@@ -68,12 +68,15 @@
   }
 
   async function send(rect) {
-    // 保持原始清晰度（只对超宽画面做上限），缩小会让日文掉字
-    const width = Math.min(rect.width, 1600);
+    // 适度放大再识别：日文假名连写和小标点在高一档分辨率下更准
+    const scale = Math.min(1.5, 2400 / Math.max(1, rect.width));
+    const width = Math.max(rect.width, Math.round(rect.width * scale));
     const height = Math.max(8, Math.round(rect.height * (width / Math.max(1, rect.width))));
     grabber.width = width;
     grabber.height = height;
     const ctx = grabber.getContext('2d', { alpha: false });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(video, rect.x, rect.y, rect.width, rect.height, 0, 0, width, height);
     const blob = await new Promise(resolve => grabber.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return;
