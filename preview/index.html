@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PS 悬浮球 · 桌面预览</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #060912;
+      font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      color: #e7f0fc;
+    }
+    .desktop {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(90% 70% at 78% 12%, rgba(44, 92, 168, 0.42), transparent 62%),
+        radial-gradient(80% 60% at 8% 92%, rgba(84, 46, 138, 0.34), transparent 60%),
+        linear-gradient(150deg, #0a1324 0%, #070b15 52%, #04060c 100%);
+    }
+    .desktop::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(140, 190, 255, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(140, 190, 255, 0.045) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(80% 70% at 60% 40%, #000 20%, transparent 80%);
+    }
+    .desktop::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(120% 100% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+      pointer-events: none;
+    }
+    .caption {
+      position: absolute;
+      top: 42px;
+      left: 54px;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .caption b {
+      font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.34em;
+      color: rgba(214, 232, 255, 0.78);
+    }
+    .caption span {
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: rgba(170, 198, 234, 0.44);
+    }
+    .caption kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      margin: 0 2px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+      font-size: 9px;
+      color: rgba(210, 228, 250, 0.6);
+    }
+    .app-window {
+      position: absolute;
+      left: 96px;
+      top: 128px;
+      width: 760px;
+      height: 520px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: linear-gradient(180deg, rgba(13, 20, 33, 0.9), rgba(7, 11, 19, 0.94));
+      box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6);
+      filter: blur(0.4px);
+      opacity: 0.9;
+      overflow: hidden;
+    }
+    .app-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 38px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .app-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+    .app-dot:nth-child(1) { background: rgba(255, 110, 110, 0.55); }
+    .app-dot:nth-child(2) { background: rgba(255, 190, 90, 0.5); }
+    .app-dot:nth-child(3) { background: rgba(110, 220, 150, 0.5); }
+    .app-title { margin-left: 8px; font-size: 11px; color: rgba(200, 218, 240, 0.5); }
+    .app-body { display: flex; height: calc(100% - 38px); }
+    .app-side {
+      width: 156px;
+      padding: 16px 10px;
+      border-right: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .app-side i {
+      display: block;
+      height: 26px;
+      margin-bottom: 6px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+    .app-side i:first-child { background: rgba(91, 157, 255, 0.15); }
+    .app-grid {
+      flex: 1;
+      padding: 20px 22px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-auto-rows: 148px;
+      gap: 14px;
+    }
+    .app-grid span {
+      border-radius: 9px;
+      background: linear-gradient(158deg, rgba(36, 58, 92, 0.9), rgba(10, 18, 32, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .app-grid span:nth-child(3n) { background: linear-gradient(158deg, rgba(58, 42, 84, 0.86), rgba(14, 10, 22, 0.95)); }
+    .app-grid span:nth-child(4n) { background: linear-gradient(158deg, rgba(32, 66, 68, 0.8), rgba(7, 16, 18, 0.95)); }
+    .taskbar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      height: 46px;
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+      background: rgba(6, 9, 15, 0.72);
+      backdrop-filter: blur(16px);
+    }
+    .taskbar i {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .taskbar i.is-on {
+      background: linear-gradient(158deg, rgba(91, 157, 255, 0.6), rgba(32, 62, 116, 0.8));
+      box-shadow: 0 0 14px rgba(91, 157, 255, 0.4);
+    }
+    .orb-stage {
+      position: absolute;
+      right: 26px;
+      bottom: 56px;
+      z-index: 5;
+      width: 508px;
+      height: 504px;
+      border: 0;
+      background: transparent;
+      color-scheme: normal;
+    }
+  </style>
+</head>
+<body>
+  <div class="desktop">
+    <div class="caption">
+      <b>PLAYSTATION ORB</b>
+      <span>桌面级置顶悬浮球 · <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>P</kbd> 显示或隐藏</span>
+    </div>
+    <div class="app-window">
+      <div class="app-bar">
+        <span class="app-dot"></span><span class="app-dot"></span><span class="app-dot"></span>
+        <span class="app-title">Vnite — 游戏库</span>
+      </div>
+      <div class="app-body">
+        <div class="app-side">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="app-grid">
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+    <div class="taskbar">
+      <i class="is-on"></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <iframe class="orb-stage" src="../plugin/orb.html" title="PlayStation 悬浮球预览"></iframe>
+  </div>
+</body>
+</html>

@@ -1,0 +1,57 @@
+{
+  "id": "local-vnite-ps-orb",
+  "name": "PlayStation 悬浮球",
+  "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。",
+  "version": "1.0.0",
+  "main": "index.cjs",
+  "icon": "icon.png",
+  "vniteVersion": "4.14.0",
+  "author": "Local",
+  "license": "MIT",
+  "category": "common",
+  "keywords": ["ui", "desktop", "floating", "orb", "playstation"],
+  "configuration": [
+    {
+      "id": "size",
+      "type": "select",
+      "title": "悬浮球大小",
+      "description": "桌面悬浮球的直径。",
+      "default": "96",
+      "options": [
+        { "label": "小 (84px)", "value": "84" },
+        { "label": "中 (96px)", "value": "96" },
+        { "label": "大 (112px)", "value": "112" }
+      ],
+      "controlOptions": { "controlType": "select" }
+    },
+    {
+      "id": "accent",
+      "type": "select",
+      "title": "强调色",
+      "description": "光环与按钮的颜色。",
+      "default": "blue",
+      "options": [
+        { "label": "经典蓝", "value": "blue" },
+        { "label": "午夜紫", "value": "violet" },
+        { "label": "极光青", "value": "cyan" }
+      ],
+      "controlOptions": { "controlType": "select" }
+    },
+    {
+      "id": "sound",
+      "type": "boolean",
+      "title": "音效",
+      "description": "展开、合上与启动时的短促提示音。",
+      "default": true,
+      "controlOptions": { "controlType": "switch" }
+    },
+    {
+      "id": "hotkey",
+      "type": "boolean",
+      "title": "快捷键 Ctrl+Alt+P",
+      "description": "用 Ctrl+Alt+P 显示或隐藏悬浮球。",
+      "default": true,
+      "controlOptions": { "controlType": "switch" }
+    }
+  ]
+}

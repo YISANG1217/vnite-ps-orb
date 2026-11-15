@@ -1,0 +1,714 @@
+:root {
+  --accent: #5b9dff;
+  --orb-size: 96px;
+  --pad: 14px;
+  --panel-w: 344px;
+  --panel-h: 452px;
+}
+
+[data-accent="violet"] {
+  --accent: #9a7bff;
+}
+
+[data-accent="cyan"] {
+  --accent: #4fd9d9;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+.ps-orb-root {
+  position: absolute;
+  inset: 0;
+  color: #e8f1ff;
+}
+
+.ps-orb-root :where(button) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ps-orb-root [hidden] {
+  display: none !important;
+}
+
+.fatal {
+  margin: 0;
+  padding: 16px;
+  color: rgba(226, 238, 252, 0.72);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ————— 悬浮球 ————— */
+
+.orb {
+  position: absolute;
+  left: var(--pad);
+  top: var(--pad);
+  z-index: 2;
+  display: block;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.28, 1);
+  touch-action: none;
+}
+
+.orb:hover {
+  transform: scale(1.045);
+}
+
+.orb.is-press {
+  transform: scale(0.93);
+  transition-duration: 0.09s;
+}
+
+.orb.is-dragging {
+  cursor: grabbing;
+  transform: scale(0.96);
+}
+
+.orb-halo {
+  position: absolute;
+  inset: -16%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 46%, transparent) 0%, transparent 68%);
+  filter: blur(8px);
+  opacity: 0.6;
+  animation: orbBreathe 4.6s ease-in-out infinite;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.orb:hover .orb-halo {
+  opacity: 0.9;
+  transform: scale(1.08);
+}
+
+.orb-glow {
+  position: absolute;
+  inset: -5%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, transparent 58%, color-mix(in srgb, var(--accent) 24%, transparent) 74%, transparent 82%);
+  pointer-events: none;
+}
+
+.orb-shell {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 24%, rgba(140, 186, 255, 0.3), transparent 44%),
+    radial-gradient(circle at 50% 118%, rgba(91, 157, 255, 0.2), transparent 56%),
+    linear-gradient(158deg, #1b2c48 0%, #0b1424 50%, #04070d 100%);
+  border: 1px solid rgba(165, 205, 255, 0.22);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.22),
+    inset 0 -14px 26px rgba(0, 0, 0, 0.6),
+    0 8px 20px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.orb-shell::after {
+  content: "";
+  position: absolute;
+  left: 14%;
+  right: 28%;
+  top: 9%;
+  height: 22%;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent);
+  filter: blur(3px);
+  transform: rotate(-18deg);
+  pointer-events: none;
+}
+
+.orb-ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 205deg,
+    transparent 0deg 196deg,
+    color-mix(in srgb, var(--accent) 70%, transparent) 240deg,
+    var(--accent) 286deg,
+    #f2f8ff 322deg,
+    transparent 352deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.6px), #000 calc(100% - 2.2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.6px), #000 calc(100% - 2.2px));
+  animation: orbSpin 8s linear infinite;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.orb-mark {
+  width: 44%;
+  height: 44%;
+  color: rgba(238, 246, 255, 0.95);
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 55%, transparent));
+  pointer-events: none;
+}
+
+/* ————— 菜单面板 ————— */
+
+.panel {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  width: var(--panel-w);
+  height: var(--panel-h);
+  padding: 16px;
+  box-sizing: border-box;
+  border-radius: 18px;
+  border: 1px solid rgba(140, 190, 255, 0.2);
+  background:
+    radial-gradient(130% 80% at 20% -18%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 60%),
+    linear-gradient(180deg, rgba(13, 20, 33, 0.975), rgba(5, 8, 14, 0.99));
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transform: scale(0.86);
+  transform-origin: 100% 100%;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.22, 1, 0.28, 1);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+[data-side="right"] .panel {
+  transform-origin: 0 100%;
+}
+
+[data-vertical="below"][data-side="left"] .panel {
+  transform-origin: 100% 0;
+}
+
+[data-vertical="below"][data-side="right"] .panel {
+  transform-origin: 0 0;
+}
+
+.panel.is-open {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.panel-hair {
+  position: absolute;
+  inset: 0 16px auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 62%, #ffffff), transparent);
+  pointer-events: none;
+}
+
+.panel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.panel-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.panel-mark {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  flex: none;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 66%, #ffffff);
+}
+
+.panel-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.panel-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.panel-brand-text b {
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: #eaf3ff;
+}
+
+.panel-brand-text i {
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: rgba(166, 192, 224, 0.5);
+}
+
+.panel-close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  color: rgba(208, 224, 244, 0.5);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.panel-close svg {
+  width: 13px;
+  height: 13px;
+}
+
+.panel-close:hover {
+  background: rgba(255, 90, 90, 0.15);
+  color: #ffb9b9;
+}
+
+.panel-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: rgba(168, 194, 226, 0.62);
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: #55d6a0;
+  box-shadow: 0 0 8px rgba(85, 214, 160, 0.8);
+  animation: statusPulse 2.6s ease-in-out infinite;
+}
+
+.panel-status.is-warn .status-dot {
+  background: #ffb454;
+  box-shadow: 0 0 8px rgba(255, 180, 84, 0.8);
+}
+
+.panel-status.is-error .status-dot {
+  background: #ff7373;
+  box-shadow: 0 0 8px rgba(255, 115, 115, 0.8);
+}
+
+/* 继续游玩 */
+
+.hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px;
+  border: 1px solid rgba(140, 190, 255, 0.16);
+  border-radius: 13px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 62%),
+    rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.hero:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, transparent);
+  background:
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 64%),
+    rgba(255, 255, 255, 0.045);
+}
+
+.hero:active {
+  transform: scale(0.985);
+}
+
+.hero-art {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  flex: none;
+  border-radius: 9px;
+  overflow: hidden;
+  background: linear-gradient(158deg, #22395a, #0a1322);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.hero-cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+}
+
+.hero-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-size: 19px;
+  letter-spacing: 0.08em;
+  color: rgba(226, 240, 255, 0.4);
+}
+
+.hero.is-blur .hero-cover {
+  filter: blur(9px) saturate(0.7);
+  transform: scale(1.12);
+}
+
+.hero-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero-kicker {
+  display: block;
+  margin-bottom: 3px;
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  color: color-mix(in srgb, var(--accent) 74%, #ffffff);
+}
+
+.hero-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.28;
+  color: #edf4ff;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hero-meta {
+  margin: 3px 0 0;
+  font-size: 9.5px;
+  color: rgba(164, 190, 222, 0.58);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-play {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: #ecf5ff;
+  color: #07101d;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 6px 16px rgba(0, 0, 0, 0.4);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.hero-play svg {
+  width: 13px;
+  height: 13px;
+  margin-left: 1px;
+}
+
+.hero:hover .hero-play {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5), 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* 最近列表 */
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(180, 202, 230, 0.56);
+}
+
+.list-head i {
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.22em;
+  opacity: 0.55;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+}
+
+.list-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.list-row:hover {
+  background: rgba(91, 157, 255, 0.1);
+  border-color: rgba(140, 190, 255, 0.2);
+}
+
+.list-cover {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: linear-gradient(158deg, #203550, #0a1322);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+
+.list-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+}
+
+.list-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-size: 12px;
+  color: rgba(226, 240, 255, 0.38);
+}
+
+.list-row.is-blur .list-cover img {
+  filter: blur(6px) saturate(0.7);
+  transform: scale(1.12);
+}
+
+.list-info {
+  min-width: 0;
+}
+
+.list-name {
+  display: block;
+  font-size: 12px;
+  color: #dbe8f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: rgba(158, 184, 216, 0.52);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-go {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(200, 220, 245, 0.5);
+  opacity: 0.55;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+}
+
+.list-go svg {
+  width: 9px;
+  height: 9px;
+  margin-left: 1px;
+}
+
+.list-row:hover .list-go {
+  opacity: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #05101d;
+}
+
+/* 空态 */
+
+.panel-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  color: rgba(168, 194, 226, 0.5);
+  font-size: 10.5px;
+}
+
+.panel-empty svg {
+  width: 48px;
+  height: 48px;
+  color: rgba(140, 190, 255, 0.18);
+  margin-bottom: 2px;
+}
+
+.panel-empty b {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(222, 235, 250, 0.78);
+}
+
+.panel-empty span {
+  font-size: 10px;
+  color: rgba(158, 184, 216, 0.5);
+}
+
+/* 底部操作 */
+
+.panel-foot {
+  display: flex;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.panel-foot button {
+  flex: 1;
+  height: 31px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: rgba(220, 232, 248, 0.84);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.panel-foot button:hover {
+  background: rgba(91, 157, 255, 0.14);
+  border-color: rgba(140, 190, 255, 0.3);
+  color: #f2f8ff;
+}
+
+.panel-foot button[data-act="hide"]:hover {
+  background: rgba(255, 90, 90, 0.1);
+  border-color: rgba(255, 120, 120, 0.32);
+  color: #ffb8b8;
+}
+
+/* 启动遮罩 */
+
+.launch {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border-radius: inherit;
+  background: rgba(4, 7, 13, 0.82);
+  backdrop-filter: blur(4px);
+  animation: launchIn 0.18s ease-out;
+}
+
+.launch-ring {
+  width: 44px;
+  height: 44px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: orbSpin 0.9s linear infinite;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.launch b {
+  font-family: Bahnschrift, "Segoe UI Variable Display", sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  color: rgba(226, 240, 255, 0.82);
+}
+
+@keyframes orbSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbBreathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.97); }
+  50% { opacity: 0.78; transform: scale(1.04); }
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes launchIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .panel,
+  .hero,
+  .orb-halo {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
