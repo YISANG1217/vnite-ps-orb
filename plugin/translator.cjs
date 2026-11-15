@@ -649,7 +649,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       .then(result => {
         idleTicks = 0;
         const text = normalizeText(result.lines || []);
-        if (text && text !== lastText) return deliver(text);
+        if (text) return acceptText(text);
         return undefined;
       })
       .catch(error => {
@@ -720,10 +720,79 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
   }
 
+  // ————— 文本去抖：同一句被识别成两个版本时字幕不要来回跳 —————
+  let pendingText = '';
+
+  const SKELETON_RE = /[\s\p{P}\p{S}]/gu;
+
+  function skeleton(text) {
+    return String(text || '').replace(SKELETON_RE, '');
+  }
+
+  function editDistance(a, b) {
+    const cols = b.length + 1;
+    let prev = new Array(cols);
+    let curr = new Array(cols);
+    for (let j = 0; j < cols; j += 1) prev[j] = j;
+    for (let i = 1; i <= a.length; i += 1) {
+      curr[0] = i;
+      for (let j = 1; j < cols; j += 1) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      }
+      const swap = prev;
+      prev = curr;
+      curr = swap;
+    }
+    return prev[cols - 1];
+  }
+
+  // 同一句的两种识别结果差异很小 → 忽略，保留先显示的那次
+  // 完全不同的文本要连续出现两次才上屏，避免闪一下乱码又跳回来
+  function acceptText(text) {
+    if (!text) return undefined;
+    if (text === lastText) {
+      pendingText = '';
+      return undefined;
+    }
+    const a = skeleton(lastText);
+    const b = skeleton(text);
+    if (a && b) {
+      if (a === b) return undefined;
+      if (1 - editDistance(a, b) / Math.max(a.length, b.length) >= 0.82) return undefined;
+    }
+    if (!lastText) {
+      pendingText = '';
+      return deliver(text);
+    }
+    if (pendingText && skeleton(pendingText) === b) {
+      pendingText = '';
+      return deliver(text);
+    }
+    pendingText = text;
+    return undefined;
+  }
+
   // 子进程直接抓屏：只在主屏上启用，坐标才能和物理像素一一对应
   function canCaptureInHelper() {
     const display = screen.getDisplayMatching(cfg.region);
     return display.bounds.x === 0 && display.bounds.y === 0;
+  }
+
+  // 把我们自己的字幕条/伴学面板涂黑再识别，否则会把显示出来的译文中再识别一遍
+  function maskRects(scale) {
+    const rects = [];
+    [subtitleWin, studyWin].forEach(win => {
+      if (!win || win.isDestroyed() || !win.isVisible()) return;
+      const bounds = win.getBounds();
+      rects.push(
+        Math.round(bounds.x * scale),
+        Math.round(bounds.y * scale),
+        Math.round(bounds.width * scale),
+        Math.round(bounds.height * scale)
+      );
+    });
+    return rects.length ? ` ${rects.join(' ')}` : '';
   }
 
   async function captureInHelper() {
@@ -733,7 +802,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const y = Math.round(cfg.region.y * scale);
     const width = Math.max(8, Math.round(cfg.region.width * scale));
     const height = Math.max(8, Math.round(cfg.region.height * scale));
-    return ocrSend(`cap ${x} ${y} ${width} ${height}`, 5000);
+    return ocrSend(`cap ${x} ${y} ${width} ${height}${maskRects(scale)}`, 5000);
   }
 
   async function processFrame() {
@@ -745,7 +814,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
       idleTicks = 0;
       const text = normalizeText(result.lines || []);
-      if (text && text !== lastText) await deliver(text);
+      if (text) await acceptText(text);
       return;
     }
 
@@ -764,8 +833,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     writeFileSync(tempImage, image.toPNG());
     const result = await ocrSend(tempImage);
     const text = normalizeText(result.lines || []);
-    if (!text || text === lastText) return;
-    await deliver(text);
+    if (!text) return;
+    await acceptText(text);
   }
 
   async function tick() {
@@ -820,6 +889,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     lastSignature = null;
     lastText = '';
     lastTranslated = '';
+    pendingText = '';
     idleTicks = 0;
     failures = 0;
     captureFailures = 0;
@@ -975,6 +1045,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         stopOcr();
         lastSignature = null;
         lastText = '';
+        pendingText = '';
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);

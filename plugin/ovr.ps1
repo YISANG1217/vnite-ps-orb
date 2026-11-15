@@ -158,7 +158,7 @@ while ($true) {
   try {
     if ($line.StartsWith('cap ')) {
       $parts = ($line.Substring(4).Trim()) -split '\s+'
-      if ($parts.Count -ne 4) { Write-Line '{"error":"bad-capture-args"}'; continue }
+      if ($parts.Count -lt 4 -or (($parts.Count - 4) % 4) -ne 0) { Write-Line '{"error":"bad-capture-args"}'; continue }
       $cx = [int]$parts[0]
       $cy = [int]$parts[1]
       $cw = [int]$parts[2]
@@ -170,6 +170,20 @@ while ($true) {
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         try {
           $g.CopyFromScreen($cx, $cy, 0, 0, (New-Object System.Drawing.Size($cw, $ch)), [System.Drawing.CopyPixelOperation]::SourceCopy)
+          # 参数后半段是「要涂黑的矩形」：字幕条 / 伴学面板自己显示的内容，
+          # 不能让它进入识别，否则会自我循环，字幕在两种译文之间来回跳
+          if ($parts.Count -ge 8) {
+            $full = New-Object System.Drawing.Rectangle(0, 0, $cw, $ch)
+            for ($i = 4; $i + 3 -lt $parts.Count; $i += 4) {
+              $maskX = [int]$parts[$i] - $cx
+              $maskY = [int]$parts[$i + 1] - $cy
+              $maskR = New-Object System.Drawing.Rectangle($maskX, $maskY, [int]$parts[$i + 2], [int]$parts[$i + 3])
+              $hit = [System.Drawing.Rectangle]::Intersect($maskR, $full)
+              if ($hit.Width -gt 0 -and $hit.Height -gt 0) {
+                $g.FillRectangle([System.Drawing.Brushes]::Black, $hit)
+              }
+            }
+          }
         } finally {
           $g.Dispose()
         }
