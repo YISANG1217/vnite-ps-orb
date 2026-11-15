@@ -84,14 +84,44 @@ async function activate(api) {
     };
   }
 
-  function loadPoint() {
+  function readState() {
     try {
-      const raw = JSON.parse(readFileSync(stateFile, 'utf8'));
-      if (Number.isFinite(raw?.x) && Number.isFinite(raw?.y)) {
-        return normalizePoint({ x: raw.x, y: raw.y });
-      }
+      return JSON.parse(readFileSync(stateFile, 'utf8')) || {};
     } catch {
-      /* 首次启动或文件损坏时使用默认位置 */
+      return {};
+    }
+  }
+
+  function writeState(patch) {
+    try {
+      mkdirSync(path.dirname(stateFile), { recursive: true });
+      writeFileSync(stateFile, JSON.stringify({ ...readState(), ...patch }), 'utf8');
+    } catch (error) {
+      console.warn('[PS 悬浮球] 保存状态失败', error);
+    }
+  }
+
+  // Vnite 会跨版本保留插件配置，旧版本的默认尺寸（76/88/96）会被当成用户选择。
+  // 升级后一次性归位到当前 manifest 的默认尺寸，之后用户手动选择的值不再改动。
+  async function migrateSize(preferences) {
+    const stored = readState();
+    if (stored.sizeMigrated) return preferences;
+    writeState({ sizeMigrated: true });
+    const size = Number.parseInt(preferences?.size, 10);
+    if (size && size !== 76 && SIZES.has(size)) return preferences;
+    const fallback = OPTION_DEFAULTS.size;
+    try {
+      await api.PluginDB.setValue('size', fallback);
+      return { ...preferences, size: fallback };
+    } catch {
+      return preferences;
+    }
+  }
+
+  function loadPoint() {
+    const raw = readState();
+    if (Number.isFinite(raw.x) && Number.isFinite(raw.y)) {
+      return normalizePoint({ x: raw.x, y: raw.y });
     }
     const area = screen.getPrimaryDisplay().workArea;
     return normalizePoint({
@@ -102,12 +132,7 @@ async function activate(api) {
 
   function savePoint() {
     if (!win || win.isDestroyed() || !orbPoint) return;
-    try {
-      mkdirSync(path.dirname(stateFile), { recursive: true });
-      writeFileSync(stateFile, JSON.stringify({ x: orbPoint.x, y: orbPoint.y }), 'utf8');
-    } catch (error) {
-      console.warn('[PS 悬浮球] 保存位置失败', error);
-    }
+    writeState({ x: orbPoint.x, y: orbPoint.y });
   }
 
   // 面板朝屏幕内侧展开：悬浮球在左半屏时面板放右侧，在上半屏时面板放下方。
@@ -374,7 +399,7 @@ async function activate(api) {
     return win;
   }
 
-  const initialPreferences = await readPreferences();
+  const initialPreferences = await migrateSize(await readPreferences());
   applyOptions(initialPreferences);
   createWindow();
 

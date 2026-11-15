@@ -22,7 +22,7 @@
 
 ### 安装包（推荐）
 
-1. 下载 `local-vnite-ps-orb-1.0.12.vnpkg`
+1. 下载 `local-vnite-ps-orb-1.0.13.vnpkg`
 2. 打开 Vnite → 设置 → 插件 → 安装本地插件，选择该文件
 3. 启用「PlayStation 悬浮球」
 
