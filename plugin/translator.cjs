@@ -380,8 +380,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
     });
     studyWin.setAlwaysOnTop(true, 'screen-saver');
-    // forward 保留：面板大部分区域要穿透给游戏，只有标题栏和缩放手柄吃鼠标
-    studyWin.setIgnoreMouseEvents(true, { forward: true });
+    // 整块面板都可以按住拖动、右下角缩放，所以不再做鼠标穿透
+    studyWin.setIgnoreMouseEvents(false);
     studyWin.loadFile(path.join(__dirname, 'study.html'));
     studyWin.on('closed', () => {
       studyWin = null;
@@ -940,10 +940,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   ipcMain.on(CH.studyDragStart, handleStudyDragStart);
   ipcMain.on(CH.studyDragEnd, () => stopStudyDrag());
   ipcMain.on(CH.studyResize, handleStudyResize);
-  ipcMain.on(CH.studyIgnore, (event, ignore) => {
-    if (!studyWin || event.sender !== studyWin.webContents) return;
-    studyWin.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
-  });
 
   ipcMain.on(CH.captureFailed, (event, reason) => {
     if (!captureWin || event.sender !== captureWin.webContents) return;
@@ -1039,7 +1035,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeAllListeners(CH.studyDragStart);
       ipcMain.removeAllListeners(CH.studyDragEnd);
       ipcMain.removeAllListeners(CH.studyResize);
-      ipcMain.removeAllListeners(CH.studyIgnore);
       [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });

@@ -50,7 +50,6 @@ contextBridge.exposeInMainWorld('psOrb', {
   studyDragStart: () => ipcRenderer.send(TR.studyDragStart),
   studyDragEnd: () => ipcRenderer.send(TR.studyDragEnd),
   studyResize: size => ipcRenderer.send(TR.studyResize, size),
-  setStudyIgnore: ignore => ipcRenderer.send(TR.studyIgnore, Boolean(ignore)),
   pushCaptureFrame: buffer => ipcRenderer.send(TR.captureFrame, buffer),
   captureFailed: reason => ipcRenderer.send(TR.captureFailed, String(reason || 'unknown')),
   resizeSubtitle: height => ipcRenderer.send(TR.resize, height),

@@ -104,20 +104,13 @@
     translationEl.textContent = translation;
   }
 
-  // ————— 拖动 / 缩放 / 鼠标穿透 —————
-  // 面板正文保持穿透给游戏，只有标题栏和右下角手柄接收鼠标
-  const headEl = document.getElementById('head');
+  // ————— 拖动 / 缩放 —————
+  // 整个面板按住就能拖；右下角折角用来缩放
+  const cardEl = document.querySelector('.card');
   const gripEl = document.getElementById('grip');
 
-  let ignoreState = null;
   let dragging = false;
   let resizing = null;
-
-  function setIgnore(next) {
-    if (ignoreState === next) return;
-    ignoreState = next;
-    api.setStudyIgnore(next);
-  }
 
   function inside(el, x, y) {
     if (!el) return false;
@@ -125,35 +118,29 @@
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
   }
 
-  window.addEventListener('mousemove', event => {
-    if (dragging || resizing) return;
-    setIgnore(!(inside(headEl, event.clientX, event.clientY) || inside(gripEl, event.clientX, event.clientY)));
-  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    cardEl?.classList.remove('is-dragging');
+    api.studyDragEnd();
+  }
 
-  window.addEventListener('mouseleave', () => {
-    if (dragging || resizing) return;
-    setIgnore(true);
-  });
-
-  headEl?.addEventListener('pointerdown', event => {
+  cardEl?.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
+    if (inside(gripEl, event.clientX, event.clientY)) {
+      resizing = {
+        x: event.screenX,
+        y: event.screenY,
+        width: window.innerWidth,
+        height: window.innerHeight
+      };
+      cardEl.setPointerCapture(event.pointerId);
+      return;
+    }
     dragging = true;
-    headEl.classList.add('is-dragging');
-    headEl.setPointerCapture?.(event.pointerId);
+    cardEl.classList.add('is-dragging');
+    cardEl.setPointerCapture(event.pointerId);
     api.studyDragStart();
-  });
-
-  gripEl?.addEventListener('pointerdown', event => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    resizing = {
-      x: event.screenX,
-      y: event.screenY,
-      width: window.innerWidth,
-      height: window.innerHeight
-    };
-    gripEl.setPointerCapture?.(event.pointerId);
-    setIgnore(false);
   });
 
   window.addEventListener('pointermove', event => {
@@ -165,15 +152,13 @@
   });
 
   window.addEventListener('pointerup', () => {
-    if (dragging) {
-      dragging = false;
-      headEl.classList.remove('is-dragging');
-      api.studyDragEnd();
-    }
-    if (resizing) {
-      resizing = null;
-      setIgnore(true);
-    }
+    endDrag();
+    resizing = null;
+  });
+
+  window.addEventListener('pointercancel', () => {
+    endDrag();
+    resizing = null;
   });
 
   api.onStudy(render);
