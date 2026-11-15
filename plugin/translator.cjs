@@ -894,10 +894,24 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return delta > 0 ? alt : base;
   }
 
+  // 识别进程已经按「是否是同一个文本框」把视觉行归并成 blocks，
+  // 不同文本框之间保留换行，避免把名字框和台词粘成一句。
+  function normalizeBlocks(blocks) {
+    const joiner = cfg.lang === 'en' ? ' ' : '';
+    return blocks
+      .map(block => String(block || '').replace(/\s+/g, joiner).trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+
   // OCR 行 → 文本：先拼接，再用词典把浊点误读纠回来（ブ↔プ、が↔か）
   async function textFromResult(result) {
-    const baseRaw = normalizeText(result.lines || []);
-    const altRaw = normalizeText(result.alt || []);
+    const baseRaw = Array.isArray(result.blocks) && result.blocks.length
+      ? normalizeBlocks(result.blocks)
+      : normalizeText(result.lines || []);
+    const altRaw = Array.isArray(result.altBlocks) && result.altBlocks.length
+      ? normalizeBlocks(result.altBlocks)
+      : normalizeText(result.alt || []);
     const base = baseRaw ? await analyzer.correct(baseRaw).catch(() => baseRaw) : '';
     const alt = altRaw ? await analyzer.correct(altRaw).catch(() => altRaw) : '';
     const text = pickBetter(base, alt);
@@ -912,7 +926,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   async function processFrame() {
     if (captureMode === 'gdi' && canCaptureInHelper()) {
       const result = await captureInHelper();
-      if (result.skip) {
+      if (result.skip || result.wait) {
+        // wait：字幕还在逐字显示或画面在动，识别进程让我们等稳定帧
         idleTicks += 1;
         return;
       }

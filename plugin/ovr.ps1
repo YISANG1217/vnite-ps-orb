@@ -54,7 +54,9 @@ if (-not $engine) {
 $SAMPLE_STEP = 8
 $DIFF_THRESHOLD = 0.004
 $lastSamples = $null
+$prevSamples = $null
 $skipCount = 0
+$waitCount = 0
 
 # 按 16px 网格采样整块区域，得到一个很轻的画面指纹
 function Get-Signature($bmp) {
@@ -99,6 +101,9 @@ function Get-OcrBitmap($bmp) {
     $scale = [Math]::Min(1.5, [Math]::Sqrt($pixelBudget / $area))
   }
   $scale = [Math]::Min($scale, $maxWidth / [Math]::Max(1, $bmp.Width))
+  # Windows OCR 对小字很吃力：框得很矮时至少把高度放大到 40px（LunaTranslator 的同款做法）
+  $minHeightScale = 40.0 / [Math]::Max(1, $bmp.Height)
+  if ($minHeightScale -gt $scale -and $minHeightScale -le 4.0) { $scale = $minHeightScale }
   if ($scale -lt 1.0 -and $area -le $pixelBudget) { $scale = 1.0 }
   if ($scale -gt 0.999 -and $scale -lt 1.001) { return $bmp }
   $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $scale))
@@ -163,7 +168,7 @@ function Get-Lines-From-Bitmap($bmp, [switch]$Enhanced) {
     $ocrBmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
     $ms.Position = 0
     $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
-    return ,(Get-Lines $stream)
+    return (Get-Lines $stream)
   } finally {
     if ($stream) { $stream.Dispose() }
     $ms.Dispose()
@@ -191,14 +196,16 @@ function Get-Lines($stream) {
     $top = [double]::MaxValue
     $left = [double]::MaxValue
     $bottom = [double]::MinValue
+    $right = [double]::MinValue
     foreach ($word in $line.Words) {
       $rect = $word.BoundingRect
       if ($rect.Top -lt $top) { $top = $rect.Top }
       if ($rect.Left -lt $left) { $left = $rect.Left }
       if ($rect.Bottom -gt $bottom) { $bottom = $rect.Bottom }
+      if ($rect.Right -gt $right) { $right = $rect.Right }
     }
-    if ($top -eq [double]::MaxValue) { $top = 0; $left = 0; $bottom = 1 }
-    $items += [pscustomobject]@{ Text = $t; Top = $top; Left = $left; Bottom = $bottom }
+    if ($top -eq [double]::MaxValue) { $top = 0; $left = 0; $bottom = 1; $right = 1 }
+    $items += [pscustomobject]@{ Text = $t; Top = $top; Left = $left; Bottom = $bottom; Right = $right }
   }
   $rows = @()
   foreach ($item in ($items | Sort-Object Top)) {
@@ -212,16 +219,37 @@ function Get-Lines($stream) {
       $target.Items += $item
       $target.Top = [Math]::Min($target.Top, $item.Top)
       $target.Bottom = [Math]::Max($target.Bottom, $item.Bottom)
+      $target.Left = [Math]::Min($target.Left, $item.Left)
+      $target.Right = [Math]::Max($target.Right, $item.Right)
       $target.Height = [Math]::Max(1, $target.Bottom - $target.Top)
     } else {
-      $rows += [pscustomobject]@{ Top = $item.Top; Bottom = $item.Bottom; Height = $height; Items = @($item) }
+      $rows += [pscustomobject]@{
+        Top = $item.Top
+        Bottom = $item.Bottom
+        Left = $item.Left
+        Right = $item.Right
+        Height = $height
+        Items = @($item)
+      }
     }
   }
   $lines = @()
+  $blocks = @()
+  $previous = $null
   foreach ($row in ($rows | Sort-Object Top)) {
-    $lines += (($row.Items | Sort-Object Left | ForEach-Object { $_.Text }) -join '')
+    $text = (($row.Items | Sort-Object Left | ForEach-Object { $_.Text }) -join '')
+    if ($text -eq '') { continue }
+    $lines += $text
+    # 沿用 LunaTranslator 的拼接规则：上一行右端没有延伸到本行右端附近，
+    # 说明是另一个文本框（旁白/名字框），要断行；否则是同段文字的自动换行，直接接上。
+    if ($blocks.Count -gt 0 -and $null -ne $previous -and $previous.Right -ge ($row.Right - $row.Height)) {
+      $blocks[$blocks.Count - 1] = $blocks[$blocks.Count - 1] + $text
+    } else {
+      $blocks += $text
+    }
+    $previous = $row
   }
-  return ,$lines
+  return @{ Lines = $lines; Blocks = $blocks }
 }
 
 # 抓取一块屏幕区域（物理像素），$Masks 是 4 个一组的「要涂黑的矩形」，可省略
@@ -253,19 +281,30 @@ function Get-CaptureBitmap([int]$cx, [int]$cy, [int]$cw, [int]$ch, $Masks) {
   }
 }
 
-# 画面指纹比对：ok / skip / black。$lastSamples、$skipCount 属于脚本作用域
+# 画面指纹比对：ok / skip / wait / black。
+# 借鉴 LunaTranslator 的「等画面稳定再识别」：字幕逐字显示、立绘切换、特效播放时
+# 抓到的是中间态，识别出来必然缺字错字，所以和上一帧还在明显变化时先不识别。
 function Test-FrameChange($bmp) {
   $signature = Get-Signature $bmp
   $max = 0
   foreach ($v in $signature) { if ($v -gt $max) { $max = $v } }
   # 独占全屏 / 受保护画面会抓成纯黑，交给主进程回落到系统截图
   if ($max -lt 24) { return 'black' }
-  $diff = Compare-Signature $script:lastSamples $signature
-  if ($diff -lt 0.0012) {
-    # 完全没变：直接跳过，不做任何识别
+  $diffStable = Compare-Signature $script:lastSamples $signature
+  $diffPrevious = Compare-Signature $script:prevSamples $signature
+  $hadPrevious = $null -ne $script:prevSamples
+  $script:prevSamples = $signature
+  if ($diffStable -lt 0.0012) {
+    # 和上次识别过的画面一样：直接跳过
     $script:skipCount = 0
     return 'skip'
   }
+  # 连续变化时最多等 6 帧（约 3.6 秒），避免动态背景导致永远不识别
+  if ($hadPrevious -and $diffPrevious -gt 0.004 -and $script:waitCount -lt 6) {
+    $script:waitCount += 1
+    return 'wait'
+  }
+  $script:waitCount = 0
   $script:skipCount = 0
   $script:lastSamples = $signature
   return 'ok'
@@ -306,18 +345,31 @@ while ($true) {
         $state = Test-FrameChange $bmp
         if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
         if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
-        $lines = Get-Lines-From-Bitmap $bmp
+        if ($state -eq 'wait') { Write-Line '{"wait":true}'; continue }
+        $first = Get-Lines-From-Bitmap $bmp
+        $lines = @($first.Lines)
+        $blocks = @($first.Blocks)
         # 第一遍结果里混进半角字母/数字，基本就是认错假名了：再用灰度增强版复核一次。
         # 正常日文台词不跑第二遍，避免长文本识别时间翻倍。
-        $joined = (@($lines) -join '')
+        $joined = ($lines -join '')
         $alt = @()
+        $altBlocks = @()
         if ($joined -match '[A-Za-z0-9]') {
-          try { $alt = Get-Lines-From-Bitmap $bmp -Enhanced } catch { $alt = @() }
+          try {
+            $second = Get-Lines-From-Bitmap $bmp -Enhanced
+            $alt = @($second.Lines)
+            $altBlocks = @($second.Blocks)
+          } catch {
+            $alt = @()
+            $altBlocks = @()
+          }
         }
         Write-Line (@{
-          text = (@($lines) -join "`n")
-          lines = @($lines)
-          alt = @($alt)
+          text = ($blocks -join "`n")
+          lines = $lines
+          blocks = $blocks
+          alt = $alt
+          altBlocks = $altBlocks
         } | ConvertTo-Json -Compress -Depth 3)
       } finally {
         $bmp.Dispose()
@@ -326,16 +378,28 @@ while ($true) {
       $bmp = $null
       try {
         $bmp = [System.Drawing.Bitmap]::FromFile($line)
-        $lines = Get-Lines-From-Bitmap $bmp
-        $joined = (@($lines) -join '')
+        $first = Get-Lines-From-Bitmap $bmp
+        $lines = @($first.Lines)
+        $blocks = @($first.Blocks)
+        $joined = ($lines -join '')
         $alt = @()
+        $altBlocks = @()
         if ($joined -match '[A-Za-z0-9]') {
-          try { $alt = Get-Lines-From-Bitmap $bmp -Enhanced } catch { $alt = @() }
+          try {
+            $second = Get-Lines-From-Bitmap $bmp -Enhanced
+            $alt = @($second.Lines)
+            $altBlocks = @($second.Blocks)
+          } catch {
+            $alt = @()
+            $altBlocks = @()
+          }
         }
         Write-Line (@{
-          text = (@($lines) -join "`n")
-          lines = @($lines)
-          alt = @($alt)
+          text = ($blocks -join "`n")
+          lines = $lines
+          blocks = $blocks
+          alt = $alt
+          altBlocks = $altBlocks
         } | ConvertTo-Json -Compress -Depth 3)
       } finally {
         if ($bmp) { $bmp.Dispose() }
