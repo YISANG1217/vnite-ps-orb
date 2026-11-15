@@ -211,12 +211,14 @@
     detailPosEl.hidden = !data.label;
     detailMeaningEl.textContent = '查询中…';
     detailMeaningEl.classList.add('is-loading');
-    const result = await api.lookupWord({
-      surface: data.surface,
-      base: data.base,
-      reading: data.reading,
-      pos: data.label
-    });
+    const result = await api
+      .lookupWord({
+        surface: data.surface,
+        base: data.base,
+        reading: data.reading,
+        pos: data.label
+      })
+      .catch(() => null);
     if (detailKey !== key) return;
     detailMeaningEl.classList.remove('is-loading');
     detailMeaningEl.textContent = result?.meaning || '未查到释义';

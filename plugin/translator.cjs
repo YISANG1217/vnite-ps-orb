@@ -396,7 +396,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       fullscreenable: false,
       skipTaskbar: true,
       hasShadow: false,
-      focusable: false,
+      // 面板要接收点击（查词、拖动、缩放），不能再是非激活窗口：
+      // 非激活 + 置顶的透明窗口在部分全屏游戏上会收不到鼠标消息
+      focusable: true,
       alwaysOnTop: true,
       show: false,
       webPreferences: {
@@ -407,9 +409,18 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         backgroundThrottling: false
       }
     });
-    studyWin.setAlwaysOnTop(true, 'screen-saver');
+    // 相对层级 1：保证压在同为 screen-saver 的字幕窗/悬浮球窗之上
+    studyWin.setAlwaysOnTop(true, 'screen-saver', 1);
     // 整块面板都可以按住拖动、右下角缩放，所以不再做鼠标穿透
     studyWin.setIgnoreMouseEvents(false);
+    // Windows 上在 show 之前设置的穿透状态可能不生效，显示后再确认一次
+    const rearm = () => {
+      if (!studyWin || studyWin.isDestroyed()) return;
+      studyWin.setIgnoreMouseEvents(false);
+    };
+    studyWin.on('show', rearm);
+    studyWin.on('focus', rearm);
+    studyWin.webContents.on('did-finish-load', rearm);
     studyWin.loadFile(path.join(__dirname, 'study.html'));
     studyWin.on('closed', () => {
       studyWin = null;
@@ -538,11 +549,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   function showStudy(payload) {
     if (!cfg.study) return;
     const win = createStudy();
-    // 每次显示前再确认一次可点击，避免任何情况下残留穿透状态
-    win.setIgnoreMouseEvents(false);
     win.webContents.send(CH.study, payload);
     placeStudy();
     if (!win.isVisible()) win.showInactive();
+    // 先显示再关穿透，并提到最前，避免被置顶的游戏窗口挡住鼠标
+    win.setIgnoreMouseEvents(false);
+    win.moveTop();
   }
 
   const analysisCache = new Map();
