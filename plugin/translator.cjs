@@ -2,7 +2,7 @@
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
 const { app, BrowserWindow, ipcMain, screen, desktopCapturer, nativeImage } = require('electron');
 const { spawn } = require('node:child_process');
-const { writeFileSync, promises: fsPromises } = require('node:fs');
+const { writeFileSync, openSync, readSync, closeSync, statSync, promises: fsPromises } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
@@ -32,6 +32,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     interval: 1000,
     study: false,
     stream: false,
+    source: 'ocr',
+    textFile: '',
     region: null
   };
 
@@ -73,6 +75,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.fontSize = Number.isFinite(fontSize) ? clamp(fontSize, 14, 40) : 22;
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
+    cfg.source = preferences?.translateSource === 'textractor' ? 'textractor' : 'ocr';
+    cfg.textFile = String(preferences?.translateTextFile || '').trim();
     cfg.stream = preferences?.translateStream === true;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
@@ -921,7 +925,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   async function tick() {
     loopTimer = null;
-    if (!running) return;
+    if (!running || cfg.source === 'textractor') return;
     const started = Date.now();
     if (captureMode === 'stream') {
       // 帧由渲染进程推送，这里只做存活检查：流 9 秒没动静就回落
@@ -965,6 +969,60 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 
+  // ————— Textractor 文本文件 —————
+  // Textractor 的「保存文本到文件」扩展会把每次新台词追加到文件末尾，
+  // 这里只读新增的字节，取最后一行直接送翻译：零识别错误、零截屏开销。
+  let fileTimer = null;
+  let fileOffset = 0;
+
+  function stopFileWatch() {
+    if (fileTimer) clearInterval(fileTimer);
+    fileTimer = null;
+    fileOffset = 0;
+  }
+
+  function startFileWatch() {
+    stopFileWatch();
+    if (!cfg.textFile) {
+      console.warn('[PS 悬浮球] 未设置 Textractor 文本文件路径');
+      return;
+    }
+    try {
+      // 从当前末尾开始，避免把历史台词全部念一遍
+      fileOffset = statSync(cfg.textFile).size;
+    } catch {
+      fileOffset = 0;
+    }
+    fileTimer = setInterval(() => {
+      if (!running || cfg.source !== 'textractor') return;
+      let stat;
+      try {
+        stat = statSync(cfg.textFile);
+      } catch {
+        return;
+      }
+      if (stat.size < fileOffset) fileOffset = 0;
+      if (stat.size <= fileOffset) return;
+      const start = stat.size - fileOffset > 65536 ? stat.size - 65536 : fileOffset;
+      const buffer = Buffer.alloc(stat.size - start);
+      const fd = openSync(cfg.textFile, 'r');
+      try {
+        readSync(fd, buffer, 0, buffer.length, start);
+      } finally {
+        closeSync(fd);
+      }
+      fileOffset = stat.size;
+      const text = buffer[0] === 0xff && buffer[1] === 0xfe
+        ? buffer.subarray(2).toString('utf16le')
+        : buffer.toString('utf8').replace(/^\uFEFF/, '');
+      const lines = text.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+      if (!lines.length) return;
+      const line = lines[lines.length - 1];
+      if (line.length < 2) return;
+      Promise.resolve(acceptText(line)).catch(() => {});
+    }, 250);
+  }
+
   function start() {
     if (running) return;
     running = true;
@@ -987,7 +1045,10 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       createStudy();
       placeStudy();
     }
-    if (cfg.region) {
+    if (cfg.source === 'textractor') {
+      // 取词来自文本文件，不需要截屏识别
+      startFileWatch();
+    } else if (cfg.region) {
       startOcr();
       // 提前把 ONNX 会话建好，避免第一句台词多等三百毫秒
       if (paddleUsable()) paddleOcr.load().catch(() => {});
@@ -1011,6 +1072,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     if (pumpTimer) clearTimeout(pumpTimer);
     pumpTimer = null;
     pendingFrame = null;
+    stopFileWatch();
     stopOcr();
     stopCaptureStream();
     if (subtitleWin && !subtitleWin.isDestroyed()) subtitleWin.hide();
@@ -1148,9 +1210,18 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         original: cfg.original,
         interval: cfg.interval,
         study: cfg.study,
-        stream: cfg.stream
+        stream: cfg.stream,
+        source: cfg.source,
+        textFile: cfg.textFile
       };
       applyConfig(preferences);
+      if (before.source !== cfg.source || before.textFile !== cfg.textFile) {
+        // 更换取词方式：整体重启一遍，避免两套取词同时跑
+        if (running) {
+          running = false;
+          start();
+        }
+      }
       if (before.lang !== cfg.lang) {
         stopOcr();
         lastSignature = null;
