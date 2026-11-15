@@ -700,26 +700,34 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return changed / pixels;
   }
 
+  let deliverSeq = 0;
+
   async function deliver(text) {
     lastText = text;
-    let translated = cache.get(text);
-    if (translated === undefined) {
-      translated = await translateText(text).catch(error => {
-        console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
-        return '';
-      });
-      if (translated) {
-        cache.set(text, translated);
-        if (cache.size > 200) cache.delete(cache.keys().next().value);
-      }
-    }
-    lastTranslated = translated || '';
-    showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
+    const seq = (deliverSeq += 1);
+    const cached = cache.get(text);
+    // 先把原文贴出来，译文回来后再补：长句翻译要一两秒，不能干等
+    showSubtitle(text, cached !== undefined ? cached : '翻译中…');
     if (cfg.study) {
-      analyzeLine(text, translated || '').catch(error => {
+      analyzeLine(text, cached || '').catch(error => {
         console.warn('[PS 悬浮球] 分词失败', error?.message || error);
       });
     }
+    if (cached !== undefined) {
+      lastTranslated = cached;
+      return;
+    }
+    const translated = await translateText(text).catch(error => {
+      console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
+      return '';
+    });
+    if (seq !== deliverSeq) return;
+    if (translated) {
+      cache.set(text, translated);
+      if (cache.size > 200) cache.delete(cache.keys().next().value);
+    }
+    lastTranslated = translated || '';
+    showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
   }
 
   // ————— 文本去抖：同一句被识别成两个版本时字幕不要来回跳 —————
@@ -768,6 +776,11 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       return deliver(text);
     }
     if (pendingText && skeleton(pendingText) === b) {
+      pendingText = '';
+      return deliver(text);
+    }
+    // 长句直接上屏：大图识别本来就慢，再等一帧会让延迟翻倍
+    if (b.length >= 16) {
       pendingText = '';
       return deliver(text);
     }

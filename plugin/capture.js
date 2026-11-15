@@ -68,9 +68,11 @@
   }
 
   async function send(rect) {
-    // 适度放大再识别：日文假名连写和小标点在高一档分辨率下更准
-    const scale = Math.min(1.5, 2400 / Math.max(1, rect.width));
-    const width = Math.max(rect.width, Math.round(rect.width * scale));
+    // 按像素预算放大：长文本自动降低倍率，OCR 时间不会随字数暴涨
+    const budget = 1200000;
+    const area = Math.max(1, rect.width * rect.height);
+    const scale = Math.max(1, Math.min(1.5, Math.sqrt(budget / area), 2400 / Math.max(1, rect.width)));
+    const width = Math.round(rect.width * scale);
     const height = Math.max(8, Math.round(rect.height * (width / Math.max(1, rect.width))));
     grabber.width = width;
     grabber.height = height;

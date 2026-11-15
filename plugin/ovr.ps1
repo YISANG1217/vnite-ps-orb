@@ -88,13 +88,19 @@ function Compare-Signature($a, $b) {
   return [double]$changed / $a.Length
 }
 
-# 识别前把画面放大 1.5 倍（上限 2400px）。实测这一档对「、」这类小标点
-# 和假名连写的识别明显更准；再往外缩或加灰度、对比度都会掉字。
+# 识别前放大。像素越多 OCR 越慢，所以按「总像素预算」决定倍率：
+# 短句（区域小）用 1.5 倍，长文本自动降到 1.0~1.3 倍，保证大段文字也不会等太久。
 function Get-OcrBitmap($bmp) {
   $maxWidth = 2400
-  $scale = [Math]::Min(1.5, $maxWidth / [Math]::Max(1, $bmp.Width))
-  if ($bmp.Width -le $maxWidth) { $scale = [Math]::Max(1.0, $scale) }
-  if ($scale -eq 1.0) { return $bmp }
+  $pixelBudget = 1200000
+  $area = [double]$bmp.Width * [double]$bmp.Height
+  $scale = 1.5
+  if ($area -gt 0) {
+    $scale = [Math]::Min(1.5, [Math]::Sqrt($pixelBudget / $area))
+  }
+  $scale = [Math]::Min($scale, $maxWidth / [Math]::Max(1, $bmp.Width))
+  if ($scale -lt 1.0 -and $area -le $pixelBudget) { $scale = 1.0 }
+  if ($scale -gt 0.999 -and $scale -lt 1.001) { return $bmp }
   $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $scale))
   $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $scale))
   $scaled = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
