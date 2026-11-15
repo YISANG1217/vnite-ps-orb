@@ -11,9 +11,9 @@
   </head>
   <body>
     <div class="card">
-      <header class="card-head">
+      <header class="card-head" id="head">
         <span class="badge">伴学</span>
-        <span class="head-hint">离线分词 · 自动拆句</span>
+        <span class="head-hint">离线分词 · 可拖动 / 右下角缩放</span>
       </header>
 
       <section class="block">
@@ -40,6 +40,8 @@
         <h3>参考译文</h3>
         <p class="translation" id="translation"></p>
       </section>
+
+      <div class="resize-grip" id="grip" title="拖动缩放"></div>
     </div>
     <script src="study.js"></script>
   </body>

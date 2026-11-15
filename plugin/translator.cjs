@@ -380,7 +380,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
     });
     studyWin.setAlwaysOnTop(true, 'screen-saver');
-    studyWin.setIgnoreMouseEvents(true);
+    // forward 保留：面板大部分区域要穿透给游戏，只有标题栏和缩放手柄吃鼠标
+    studyWin.setIgnoreMouseEvents(true, { forward: true });
     studyWin.loadFile(path.join(__dirname, 'study.html'));
     studyWin.on('closed', () => {
       studyWin = null;
@@ -390,17 +391,37 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   }
 
   let studyBounds = null;
+  let studyRect = null;
+  let studyDrag = null;
 
-  // 伴学面板贴在游戏窗口所在屏幕的右侧，竖向居中
+  const savedStudy = readState().studyRect;
+  if (savedStudy && Number.isFinite(savedStudy.width) && Number.isFinite(savedStudy.height)) {
+    studyRect = {
+      x: Number(savedStudy.x) || 0,
+      y: Number(savedStudy.y) || 0,
+      width: savedStudy.width,
+      height: savedStudy.height
+    };
+  }
+
+  // 伴学面板：默认贴游戏屏幕右侧竖向居中；拖动/缩放后记住位置与大小
   function placeStudy() {
     if (!studyWin || studyWin.isDestroyed()) return;
     const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
     const area = display.workArea;
-    const width = Math.min(460, Math.max(320, Math.round(area.width * 0.3)));
-    const height = Math.min(680, Math.round(area.height * 0.68));
+    const width = clamp(
+      studyRect ? Math.round(studyRect.width) : Math.round(area.width * 0.3),
+      320,
+      Math.min(620, area.width - 40)
+    );
+    const height = clamp(
+      studyRect ? Math.round(studyRect.height) : Math.round(area.height * 0.68),
+      320,
+      Math.min(900, area.height - 40)
+    );
     const next = {
-      x: area.x + area.width - width - Math.round(area.width * 0.018),
-      y: area.y + Math.round((area.height - height) / 2),
+      x: clamp(studyRect ? Math.round(studyRect.x) : area.x + area.width - width - Math.round(area.width * 0.018), area.x, area.x + area.width - width),
+      y: clamp(studyRect ? Math.round(studyRect.y) : area.y + Math.round((area.height - height) / 2), area.y, area.y + area.height - height),
       width,
       height
     };
@@ -415,6 +436,67 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     studyBounds = next;
     studyWin.setBounds(next, false);
+  }
+
+  function rememberStudyRect() {
+    if (!studyWin || studyWin.isDestroyed()) return;
+    const rect = studyWin.getBounds();
+    studyRect = rect;
+    studyBounds = rect;
+    writeState({ studyRect: rect });
+  }
+
+  function stopStudyDrag() {
+    if (!studyDrag) return;
+    clearInterval(studyDrag.timer);
+    studyDrag = null;
+    rememberStudyRect();
+  }
+
+  function handleStudyDragStart(event) {
+    if (!studyWin || event.sender !== studyWin.webContents) return;
+    stopStudyDrag();
+    const point = screen.getCursorScreenPoint();
+    const bounds = studyWin.getBounds();
+    const drag = { dx: point.x - bounds.x, dy: point.y - bounds.y, timer: null };
+    drag.timer = setInterval(() => {
+      if (!studyWin || studyWin.isDestroyed() || studyDrag !== drag) {
+        stopStudyDrag();
+        return;
+      }
+      const cursor = screen.getCursorScreenPoint();
+      const area = screen.getDisplayNearestPoint(cursor).workArea;
+      const { width, height } = studyWin.getBounds();
+      studyWin.setBounds(
+        {
+          x: clamp(cursor.x - drag.dx, area.x, area.x + area.width - width),
+          y: clamp(cursor.y - drag.dy, area.y, area.y + area.height - height),
+          width,
+          height
+        },
+        false
+      );
+    }, 16);
+    studyDrag = drag;
+  }
+
+  function handleStudyResize(event, size) {
+    if (!studyWin || event.sender !== studyWin.webContents) return;
+    const bounds = studyWin.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const width = clamp(Math.round(Number(size?.width) || bounds.width), 320, Math.min(620, area.width - 40));
+    const height = clamp(Math.round(Number(size?.height) || bounds.height), 320, Math.min(900, area.height - 40));
+    studyBounds = null;
+    studyWin.setBounds(
+      {
+        x: clamp(bounds.x, area.x, area.x + area.width - width),
+        y: clamp(bounds.y, area.y, area.y + area.height - height),
+        width,
+        height
+      },
+      false
+    );
+    rememberStudyRect();
   }
 
   function showStudy(payload) {
@@ -855,6 +937,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   ipcMain.on(CH.captureFrame, handleCaptureFrame);
 
+  ipcMain.on(CH.studyDragStart, handleStudyDragStart);
+  ipcMain.on(CH.studyDragEnd, () => stopStudyDrag());
+  ipcMain.on(CH.studyResize, handleStudyResize);
+  ipcMain.on(CH.studyIgnore, (event, ignore) => {
+    if (!studyWin || event.sender !== studyWin.webContents) return;
+    studyWin.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+  });
+
   ipcMain.on(CH.captureFailed, (event, reason) => {
     if (!captureWin || event.sender !== captureWin.webContents) return;
     console.warn('[PS 悬浮球] 画面流不可用，改用直接截屏', reason);
@@ -939,12 +1029,17 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       loopTimer = null;
       if (pumpTimer) clearTimeout(pumpTimer);
       pumpTimer = null;
+      stopStudyDrag();
       stopOcr();
       ipcMain.removeAllListeners(CH.regionCommit);
       ipcMain.removeAllListeners(CH.regionCancel);
       ipcMain.removeAllListeners(CH.resize);
       ipcMain.removeAllListeners(CH.captureFrame);
       ipcMain.removeAllListeners(CH.captureFailed);
+      ipcMain.removeAllListeners(CH.studyDragStart);
+      ipcMain.removeAllListeners(CH.studyDragEnd);
+      ipcMain.removeAllListeners(CH.studyResize);
+      ipcMain.removeAllListeners(CH.studyIgnore);
       [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });

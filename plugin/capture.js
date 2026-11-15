@@ -22,6 +22,7 @@
   let lastSentAt = 0;
   let lastBeatAt = 0;
   let sending = false;
+  let sameCount = 0;
 
   function fail(reason) {
     api.captureFailed(reason);
@@ -97,8 +98,18 @@
     } catch {
       return;
     }
-    // 变化太小：不更新基准，让缓慢变化累积
-    if (diffRatio(lastSignature, signatureNow) < DIFF_THRESHOLD) return;
+    // 完全没变：直接跳过
+    const ratio = diffRatio(lastSignature, signatureNow);
+    if (ratio < 0.0008) {
+      sameCount = 0;
+      return;
+    }
+    // 变化太小：先跳过，但连续两帧都这样也强制发一张，避免小的翻页变化被漏掉
+    if (ratio < DIFF_THRESHOLD) {
+      sameCount += 1;
+      if (sameCount < 3) return;
+    }
+    sameCount = 0;
     if (now - lastSentAt < SEND_COOLDOWN) return;
     lastSignature = signatureNow;
     lastSentAt = now;

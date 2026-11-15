@@ -51,9 +51,10 @@ if (-not $engine) {
   exit 1
 }
 
-$SAMPLE_STEP = 16
-$DIFF_THRESHOLD = 0.02
+$SAMPLE_STEP = 12
+$DIFF_THRESHOLD = 0.012
 $lastSamples = $null
+$skipCount = 0
 
 # 按 16px 网格采样整块区域，得到一个很轻的画面指纹
 function Get-Signature($bmp) {
@@ -161,11 +162,23 @@ while ($true) {
         # 独占全屏 / 受保护画面会抓成纯黑，交给主进程回落到系统截图
         if ($max -lt 24) { Write-Line '{"error":"capture-black"}'; continue }
 
-        if ((Compare-Signature $lastSamples $signature) -lt $DIFF_THRESHOLD) {
-          # 画面几乎没变：不更新基准，让缓慢变化继续累积，也省掉一次 OCR
+        $diff = Compare-Signature $lastSamples $signature
+        if ($diff -lt 0.0008) {
+          # 完全没变：直接跳过，不做任何识别
+          $skipCount = 0
           Write-Line '{"skip":true}'
           continue
         }
+        if ($diff -lt $DIFF_THRESHOLD) {
+          # 变化太小先跳过，但最多跳两次：再小的变化也强制识别一帧，
+          # 否则「翻页后只有一小行字变了」会永远触发不了
+          if ($skipCount -lt 2) {
+            $skipCount++
+            Write-Line '{"skip":true}'
+            continue
+          }
+        }
+        $skipCount = 0
         $lastSamples = $signature
 
         $ocrBmp = Get-OcrBitmap $bmp
