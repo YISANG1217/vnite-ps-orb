@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; font-src 'self'"
+    />
+    <title>实时翻译字幕</title>
+    <link rel="stylesheet" href="subtitle.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <div class="bar" id="bar" hidden>
+        <p class="original" id="original" hidden></p>
+        <p class="translated" id="translated"></p>
+      </div>
+    </div>
+    <script src="subtitle.js"></script>
+  </body>
+</html>

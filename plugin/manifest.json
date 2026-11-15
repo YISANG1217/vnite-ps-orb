@@ -1,8 +1,8 @@
 {
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
-  "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。隐藏后可从 Vnite 托盘菜单重新唤出。",
-  "version": "1.0.14",
+  "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。内置实时翻译字幕：框选游戏文字区域，OCR 识别并翻译成中文显示在屏幕底部。",
+  "version": "1.1.0",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
@@ -83,6 +83,162 @@
       "default": true,
       "controlOptions": {
         "controlType": "switch"
+      }
+    },
+    {
+      "id": "translateEnabled",
+      "type": "boolean",
+      "title": "实时翻译字幕",
+      "description": "截取框选的文字区域，用 Windows OCR 识别后翻译，结果显示在屏幕底部的字幕条上。",
+      "default": false,
+      "controlOptions": {
+        "controlType": "switch"
+      }
+    },
+    {
+      "id": "translateEngine",
+      "type": "select",
+      "title": "翻译引擎",
+      "description": "腾讯与谷歌为免费接口；自建模型可对接 Sakura、Ollama、DeepSeek 等 OpenAI 兼容服务。",
+      "default": "tencent",
+      "options": [
+        {
+          "label": "腾讯交互翻译（免费）",
+          "value": "tencent"
+        },
+        {
+          "label": "谷歌（免费，需可访问）",
+          "value": "google"
+        },
+        {
+          "label": "OpenAI 兼容（Sakura / Ollama / DeepSeek）",
+          "value": "openai"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
+      }
+    },
+    {
+      "id": "translateLang",
+      "type": "select",
+      "title": "原文语言",
+      "description": "OCR 与翻译使用的源语言。",
+      "default": "ja",
+      "options": [
+        {
+          "label": "日语",
+          "value": "ja"
+        },
+        {
+          "label": "英语",
+          "value": "en"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
+      }
+    },
+    {
+      "id": "translateApiUrl",
+      "type": "string",
+      "title": "接口地址",
+      "description": "仅「OpenAI 兼容」引擎使用，例如 http://127.0.0.1:11434/v1 或 https://api.deepseek.com/v1。",
+      "default": "http://127.0.0.1:11434/v1",
+      "controlOptions": {
+        "controlType": "input",
+        "inputType": "text",
+        "placeholder": "http://127.0.0.1:11434/v1"
+      }
+    },
+    {
+      "id": "translateApiKey",
+      "type": "string",
+      "title": "接口密钥",
+      "description": "仅「OpenAI 兼容」引擎使用，本地 Ollama 可留空。",
+      "default": "",
+      "controlOptions": {
+        "controlType": "input",
+        "inputType": "password",
+        "placeholder": "sk-..."
+      }
+    },
+    {
+      "id": "translateModel",
+      "type": "string",
+      "title": "模型名称",
+      "description": "仅「OpenAI 兼容」引擎使用，例如 qwen2.5:7b、sakura-14b、deepseek-chat。",
+      "default": "qwen2.5:7b",
+      "controlOptions": {
+        "controlType": "input",
+        "inputType": "text",
+        "placeholder": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "translateFontSize",
+      "type": "select",
+      "title": "字幕字号",
+      "description": "译文文字大小。",
+      "default": "22",
+      "options": [
+        {
+          "label": "小 (18px)",
+          "value": "18"
+        },
+        {
+          "label": "中 (22px)",
+          "value": "22"
+        },
+        {
+          "label": "大 (26px)",
+          "value": "26"
+        },
+        {
+          "label": "特大 (30px)",
+          "value": "30"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
+      }
+    },
+    {
+      "id": "translateOriginal",
+      "type": "boolean",
+      "title": "字幕显示原文",
+      "description": "在译文上方显示 OCR 识别到的原文。",
+      "default": true,
+      "controlOptions": {
+        "controlType": "switch"
+      }
+    },
+    {
+      "id": "translateInterval",
+      "type": "select",
+      "title": "识别间隔",
+      "description": "间隔越短越跟手，CPU 占用也越高。",
+      "default": "1000",
+      "options": [
+        {
+          "label": "0.6 秒",
+          "value": "600"
+        },
+        {
+          "label": "1 秒",
+          "value": "1000"
+        },
+        {
+          "label": "1.5 秒",
+          "value": "1500"
+        },
+        {
+          "label": "2 秒",
+          "value": "2000"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
       }
     }
   ]

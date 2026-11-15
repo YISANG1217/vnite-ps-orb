@@ -813,6 +813,31 @@ body {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent);
 }
 
+.setting-group {
+  margin-top: 10px;
+  padding: 6px 2px 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: rgba(190, 210, 238, 0.42);
+}
+
+.ghost-button {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: rgba(226, 238, 255, 0.78);
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.ghost-button:hover {
+  background: rgba(91, 157, 255, 0.14);
+  border-color: rgba(140, 190, 255, 0.3);
+  color: #f2f8ff;
+}
+
 .switch {
   position: relative;
   width: 38px;

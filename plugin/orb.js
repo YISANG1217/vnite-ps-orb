@@ -37,6 +37,8 @@
     panelW: 344,
     panelH: 452,
     sound: true,
+    translate: false,
+    fontSize: 22,
     hero: null,
     games: []
   };
@@ -110,6 +112,8 @@
     if (payload.side) root.dataset.side = payload.side;
     if (payload.anchor) root.dataset.anchor = payload.anchor;
     if (typeof payload.sound === 'boolean') state.sound = payload.sound;
+    if (typeof payload.translateEnabled === 'boolean') state.translate = payload.translateEnabled;
+    if (Number(payload.translateFontSize)) state.fontSize = Number(payload.translateFontSize);
   }
 
   // 透明窗口固定为展开尺寸，只有悬浮球与面板区域接收鼠标，其余区域穿透到桌面。
@@ -348,6 +352,12 @@
     const soundSwitch = settingsEl.querySelector('[data-key="sound"]');
     soundSwitch.classList.toggle('is-on', state.sound);
     soundSwitch.setAttribute('aria-checked', String(state.sound));
+    settingsEl.querySelectorAll('[data-key="fontSize"] button').forEach(button => {
+      button.classList.toggle('is-on', Number(button.dataset.value) === state.fontSize);
+    });
+    const translateSwitch = settingsEl.querySelector('[data-key="translate"]');
+    translateSwitch.classList.toggle('is-on', state.translate);
+    translateSwitch.setAttribute('aria-checked', String(state.translate));
   }
 
   async function setOption(key, value) {
@@ -393,6 +403,26 @@
         play('tap');
       }
       setOption('sound', next);
+      return;
+    }
+    const fontButton = event.target.closest('[data-key="fontSize"] button');
+    if (fontButton) {
+      const size = Number(fontButton.dataset.value);
+      if (size !== state.fontSize) {
+        play('tap');
+        setOption('translateFontSize', size);
+      }
+      return;
+    }
+    if (event.target.closest('[data-key="translate"]')) {
+      const next = !state.translate;
+      if (next) play('tap');
+      setOption('translateEnabled', next);
+      return;
+    }
+    if (event.target.closest('[data-act="region"]')) {
+      play('tap');
+      api.openTranslateRegion();
     }
   });
 
@@ -585,7 +615,9 @@
       accent: 'blue',
       side: 'left',
       anchor: 'bottom',
-      sound: false
+      sound: false,
+      translateEnabled: false,
+      translateFontSize: 22
     };
     return {
       bootstrap: async () => base,
@@ -600,6 +632,7 @@
       launch: async () => ({ ok: true }),
       openVnite: async () => true,
       hide: async () => true,
+      openTranslateRegion: async () => true,
       setOption: async (key, value) => ({ ...base, [key === 'size' ? 'orbSize' : key]: value }),
       onLayout: () => {},
       onBlur: () => {},

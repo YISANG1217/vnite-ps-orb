@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, screen, globalShortcut, Menu, MenuItem, Tra
 const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { id: pluginId, configuration } = require('./manifest.json');
+const { createTranslator } = require('./translator.cjs');
 
 // 窗口始终保持展开后的尺寸：展开/收起只切换面板显隐，不再改变窗口大小，
 // 这是点击悬浮球时闪动的根因。透明区域通过 setIgnoreMouseEvents 让鼠标穿透。
@@ -11,6 +12,8 @@ const PANEL_W = 344;
 const PANEL_H = 452;
 const EDGE = 8;
 const TRAY_ITEM_ID = `${pluginId}:tray-toggle`;
+const TRAY_TRANSLATE_ID = `${pluginId}:tray-translate`;
+const TRAY_REGION_ID = `${pluginId}:tray-region`;
 
 const CHANNELS = {
   bootstrap: `${pluginId}:bootstrap`,
@@ -30,10 +33,11 @@ const CHANNELS = {
   blur: `${pluginId}:blur`,
   forceCollapse: `${pluginId}:force-collapse`,
   setOption: `${pluginId}:set-option`,
-  openSettings: `${pluginId}:open-settings`
+  openSettings: `${pluginId}:open-settings`,
+  openTranslateRegion: `${pluginId}:open-translate-region`
 };
 
-const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide', 'setOption'];
+const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide', 'setOption', 'openTranslateRegion'];
 const LISTEN_CHANNELS = ['dragStart', 'dragMove', 'dragEnd', 'setIgnore', 'contextMenu'];
 
 const OPTION_DEFAULTS = Object.fromEntries(
@@ -64,6 +68,7 @@ async function activate(api) {
   let drag = null;
   let menuOpen = false;
   let win = null;
+  let translator = null;
 
   function readPreferences() {
     return api.PluginDB.getValue('#all', {}).catch(() => ({}));
@@ -190,6 +195,7 @@ async function activate(api) {
       accent,
       side: anchorX,
       anchor: anchorY,
+      ...(translator ? translator.info() : {}),
       ...extra
     };
   }
@@ -404,6 +410,16 @@ async function activate(api) {
   applyOptions(initialPreferences);
   createWindow();
 
+  translator = createTranslator({
+    api,
+    stateFile,
+    readState,
+    writeState,
+    refreshTray: () => refreshTrayMenu(),
+    defaults: OPTION_DEFAULTS
+  });
+  translator.sync(initialPreferences);
+
   function checkSender(event) {
     if (!win || win.isDestroyed() || event.sender !== win.webContents) {
       throw new Error('The orb channel is available only inside the floating orb window.');
@@ -533,21 +549,30 @@ async function activate(api) {
     return true;
   });
 
-  const OPTION_KEYS = new Set(['size', 'accent', 'sound']);
+  const OPTION_KEYS = new Set(['size', 'accent', 'sound', 'translateEnabled', 'translateFontSize']);
+  const BOOLEAN_OPTIONS = new Set(['sound', 'translateEnabled']);
 
   // 面板里的设置项：写回插件配置，立即生效
   ipcMain.handle(CHANNELS.setOption, async (event, key, value) => {
     checkSender(event);
     if (!OPTION_KEYS.has(key)) return layoutPayload({ sound });
     try {
-      await api.PluginDB.setValue(key, key === 'sound' ? Boolean(value) : String(value));
+      await api.PluginDB.setValue(key, BOOLEAN_OPTIONS.has(key) ? Boolean(value) : String(value));
     } catch (error) {
       console.warn('[PS 悬浮球] 保存设置失败', error);
     }
-    applyOptions(await readPreferences());
+    const preferences = await readPreferences();
+    applyOptions(preferences);
+    translator.sync(preferences);
     if (key === 'size') writeState({ sizeTouched: true, lastSize: orbSize });
     placeWindow();
     return layoutPayload({ sound });
+  });
+
+  ipcMain.handle(CHANNELS.openTranslateRegion, event => {
+    checkSender(event);
+    translator.openOverlay();
+    return true;
   });
 
   function toggleVisible() {
@@ -594,13 +619,23 @@ async function activate(api) {
   function decorateTrayMenu(menu) {
     if (!menu || !Array.isArray(menu.items)) return;
     if (menu.items.some(item => item.id === TRAY_ITEM_ID)) return;
+    const translateItem = new MenuItem({
+      id: TRAY_TRANSLATE_ID,
+      label: translator?.isRunning() ? '实时翻译：已开启' : '实时翻译：已关闭',
+      click: () => setTimeout(() => translator?.toggle(), 0)
+    });
+    const regionItem = new MenuItem({
+      id: TRAY_REGION_ID,
+      label: '框选翻译区域',
+      click: () => setTimeout(() => translator?.openOverlay(), 0)
+    });
     const item = new MenuItem({
       id: TRAY_ITEM_ID,
       label: trayLabel(),
       // 延后一拍：避免在原生菜单点击回调里立刻重建托盘菜单
       click: () => setTimeout(toggleVisible, 0)
     });
-    // 放在最后一条分隔线之前：设置 → 显示悬浮球 ── 退出
+    // 放在最后一条分隔线之前：设置 → 实时翻译 → 框选翻译区域 → 显示悬浮球 ── 退出
     let insertAt = menu.items.length;
     for (let index = menu.items.length - 1; index >= 0; index -= 1) {
       if (menu.items[index].type === 'separator') {
@@ -608,7 +643,9 @@ async function activate(api) {
         break;
       }
     }
-    menu.insert(insertAt, item);
+    menu.insert(insertAt, translateItem);
+    menu.insert(insertAt + 1, regionItem);
+    menu.insert(insertAt + 2, item);
   }
 
   function installTrayEntry() {
@@ -699,6 +736,7 @@ async function activate(api) {
       const before = { size: orbSize, accent, sound };
       applyOptions(preferences);
       applyHotkey(preferences?.hotkey !== false);
+      translator.sync(preferences);
       const sizeChanged = before.size !== orbSize;
       if (sizeChanged) {
         // 在 Vnite 设置页里改了尺寸，记为显式选择
@@ -724,6 +762,8 @@ async function activate(api) {
   dispose = async () => {
     clearInterval(prefsTimer);
     removeTrayEntry();
+    translator?.dispose();
+    translator = null;
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);
     globalShortcut.unregister('Control+Alt+P');

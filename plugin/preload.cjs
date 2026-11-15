@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const { id } = require('./manifest.json');
+const { translate: TR } = require('./channels.cjs');
 
 const channel = name => `${id}:${name}`;
 
+// 悬浮球、字幕窗、框选窗共用这一个 preload
 contextBridge.exposeInMainWorld('psOrb', {
   bootstrap: () => ipcRenderer.invoke(channel('bootstrap')),
   games: () => ipcRenderer.invoke(channel('games')),
@@ -17,6 +19,7 @@ contextBridge.exposeInMainWorld('psOrb', {
   openVnite: () => ipcRenderer.invoke(channel('open-vnite')),
   hide: () => ipcRenderer.invoke(channel('hide')),
   setOption: (key, value) => ipcRenderer.invoke(channel('set-option'), key, value),
+  openTranslateRegion: () => ipcRenderer.invoke(channel('open-translate-region')),
   onLayout: callback => {
     ipcRenderer.on(channel('layout'), (_event, payload) => callback(payload));
   },
@@ -31,5 +34,14 @@ contextBridge.exposeInMainWorld('psOrb', {
   },
   onForceExpand: callback => {
     ipcRenderer.on(channel('force-expand'), () => callback());
-  }
+  },
+  onSubtitle: callback => {
+    ipcRenderer.on(TR.subtitle, (_event, payload) => callback(payload));
+  },
+  onSubtitleStyle: callback => {
+    ipcRenderer.on(TR.style, (_event, payload) => callback(payload));
+  },
+  resizeSubtitle: height => ipcRenderer.send(TR.resize, height),
+  commitRegion: rect => ipcRenderer.send(TR.regionCommit, rect),
+  cancelRegion: () => ipcRenderer.send(TR.regionCancel)
 });
