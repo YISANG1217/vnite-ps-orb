@@ -101,21 +101,22 @@ async function activate(api) {
     }
   }
 
-  // Vnite 会跨版本保留插件配置，旧版本的默认尺寸（76/88/96）会被当成用户选择。
-  // 升级后一次性归位到当前 manifest 的默认尺寸，之后用户手动选择的值不再改动。
-  async function migrateSize(preferences) {
-    const stored = readState();
-    if (stored.sizeMigrated) return preferences;
-    writeState({ sizeMigrated: true });
-    const size = Number.parseInt(preferences?.size, 10);
-    if (size && size !== 76 && SIZES.has(size)) return preferences;
-    const fallback = OPTION_DEFAULTS.size;
-    try {
-      await api.PluginDB.setValue('size', fallback);
-      return { ...preferences, size: fallback };
-    } catch {
-      return preferences;
+  // Vnite 会把插件配置跨版本保留，旧版本的默认尺寸（76/88/96）会被当成用户选择。
+  // 只有用户在面板/Vnite 设置里明确改过尺寸时才沿用，否则回到当前默认值。
+  async function resolveSize(preferences) {
+    const saved = readState();
+    const stored = Number.parseInt(preferences?.size, 10);
+    const touched = saved.sizeTouched || (saved.lastSize !== undefined && stored !== saved.lastSize);
+    let size = SIZES.has(stored) && touched ? stored : Number.parseInt(OPTION_DEFAULTS.size, 10) || 64;
+    if (stored !== size) {
+      try {
+        await api.PluginDB.setValue('size', String(size));
+      } catch {
+        /* 写回失败时仍然按默认尺寸渲染 */
+      }
     }
+    writeState({ lastSize: size });
+    return { ...preferences, size: String(size) };
   }
 
   function loadPoint() {
@@ -399,7 +400,7 @@ async function activate(api) {
     return win;
   }
 
-  const initialPreferences = await migrateSize(await readPreferences());
+  const initialPreferences = await resolveSize(await readPreferences());
   applyOptions(initialPreferences);
   createWindow();
 
@@ -544,6 +545,7 @@ async function activate(api) {
       console.warn('[PS 悬浮球] 保存设置失败', error);
     }
     applyOptions(await readPreferences());
+    if (key === 'size') writeState({ sizeTouched: true, lastSize: orbSize });
     placeWindow();
     return layoutPayload({ sound });
   });
@@ -699,6 +701,8 @@ async function activate(api) {
       applyHotkey(preferences?.hotkey !== false);
       const sizeChanged = before.size !== orbSize;
       if (sizeChanged) {
+        // 在 Vnite 设置页里改了尺寸，记为显式选择
+        writeState({ sizeTouched: true, lastSize: orbSize });
         if (expanded) {
           expanded = false;
           send(CHANNELS.forceCollapse);
