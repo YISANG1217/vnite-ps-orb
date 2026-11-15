@@ -68,14 +68,14 @@
   }
 
   async function send(rect) {
-    // 识别不需要原始分辨率，缩到 1100 宽以内，OCR 更快也不会明显掉精度
-    const width = Math.min(rect.width, 1100);
+    // 保持原始清晰度（只对超宽画面做上限），缩小会让日文掉字
+    const width = Math.min(rect.width, 1600);
     const height = Math.max(8, Math.round(rect.height * (width / Math.max(1, rect.width))));
     grabber.width = width;
     grabber.height = height;
     const ctx = grabber.getContext('2d', { alpha: false });
     ctx.drawImage(video, rect.x, rect.y, rect.width, rect.height, 0, 0, width, height);
-    const blob = await new Promise(resolve => grabber.toBlob(resolve, 'image/jpeg', 0.92));
+    const blob = await new Promise(resolve => grabber.toBlob(resolve, 'image/jpeg', 0.95));
     if (!blob) return;
     const buffer = new Uint8Array(await blob.arrayBuffer());
     api.pushCaptureFrame(buffer);

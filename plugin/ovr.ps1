@@ -88,9 +88,10 @@ function Compare-Signature($a, $b) {
   return [double]$changed / $a.Length
 }
 
-# 识别前先把大图缩小：像素少一半，OCR 时间也差不多少一半
+# 识别前只做一件事：太宽才缩（上限 1600），保持原始清晰度。
+# 实测：缩小、灰度化、加对比度都会明显掉字，尤其是日文彩色对话框上的浅色字。
 function Get-OcrBitmap($bmp) {
-  $maxWidth = 1100
+  $maxWidth = 1600
   if ($bmp.Width -le $maxWidth) { return $bmp }
   $ratio = $maxWidth / $bmp.Width
   $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $ratio))
@@ -105,6 +106,23 @@ function Get-OcrBitmap($bmp) {
     $g.Dispose()
   }
   return $scaled
+}
+
+# 位图 → BMP 内存流 → 识别
+function Get-Lines-From-Bitmap($bmp) {
+  $ocrBmp = Get-OcrBitmap $bmp
+  $ms = New-Object System.IO.MemoryStream
+  $stream = $null
+  try {
+    $ocrBmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
+    $ms.Position = 0
+    $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
+    return ,(Get-Lines $stream)
+  } finally {
+    if ($stream) { $stream.Dispose() }
+    $ms.Dispose()
+    if (-not [object]::ReferenceEquals($ocrBmp, $bmp)) { $ocrBmp.Dispose() }
+  }
 }
 
 function Get-Lines($stream) {
@@ -181,31 +199,19 @@ while ($true) {
         $skipCount = 0
         $lastSamples = $signature
 
-        $ocrBmp = Get-OcrBitmap $bmp
-        $ms = New-Object System.IO.MemoryStream
-        $stream = $null
-        try {
-          $ocrBmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Bmp)
-          $ms.Position = 0
-          $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($ms)
-          $lines = Get-Lines $stream
-          Write-Line (ConvertTo-Json-Lines $lines)
-        } finally {
-          if ($stream) { $stream.Dispose() }
-          $ms.Dispose()
-          if (-not [object]::ReferenceEquals($ocrBmp, $bmp)) { $ocrBmp.Dispose() }
-        }
+        $lines = Get-Lines-From-Bitmap $bmp
+        Write-Line (ConvertTo-Json-Lines $lines)
       } finally {
         $bmp.Dispose()
       }
     } else {
-      $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($line)) ([Windows.Storage.StorageFile])
-      $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+      $bmp = $null
       try {
-        $lines = Get-Lines $stream
+        $bmp = [System.Drawing.Bitmap]::FromFile($line)
+        $lines = Get-Lines-From-Bitmap $bmp
         Write-Line (ConvertTo-Json-Lines $lines)
       } finally {
-        $stream.Dispose()
+        if ($bmp) { $bmp.Dispose() }
       }
     }
   } catch {
