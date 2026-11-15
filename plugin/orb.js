@@ -397,12 +397,9 @@
     if (!press) return;
     if (!press.moved && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4) {
       press.moved = true;
-      // 菜单展开时只响应点击，不拖动窗口
-      if (!state.expanded) {
-        state.dragging = true;
-        orb.classList.add('is-dragging');
-        api.dragStart();
-      }
+      state.dragging = true;
+      orb.classList.add('is-dragging');
+      api.dragStart();
     }
     if (state.dragging && !moveFrame) moveFrame = window.requestAnimationFrame(flushDrag);
   });

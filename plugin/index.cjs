@@ -390,12 +390,12 @@ async function activate(api) {
   });
 
   ipcMain.on(CHANNELS.dragStart, event => {
-    if (!win || win.isDestroyed() || event.sender !== win.webContents || expanded) return;
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
     drag = { origin: win.getBounds(), cursor: screen.getCursorScreenPoint() };
   });
 
   ipcMain.on(CHANNELS.dragMove, event => {
-    if (!drag || !win || win.isDestroyed() || event.sender !== win.webContents || expanded) return;
+    if (!drag || !win || win.isDestroyed() || event.sender !== win.webContents) return;
     const point = screen.getCursorScreenPoint();
     win.setPosition(
       Math.round(drag.origin.x + point.x - drag.cursor.x),
