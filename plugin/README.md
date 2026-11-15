@@ -39,7 +39,7 @@ OCR 在花哨的游戏字体上总会错几个字，想完全准确可以直接�
 
 ## 安装
 
-1. 下载 `local-vnite-ps-orb-1.13.0.vnpkg`
+1. 下载 `local-vnite-ps-orb-1.13.1.vnpkg`
 2. 打开 Vnite → 设置 → 插件 → 安装本地插件，选择该文件
 3. 启用「PlayStation 悬浮球」
 

@@ -911,6 +911,23 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 
+  // 剪贴板/文件里会混进 Textractor 自己的报错（「翻译时出错」「Text threads」等），
+  // 只保留确实像目标语言台词的行，避免这些噪音进字幕。
+  function looksLikeTarget(text) {
+    if (cfg.lang === 'en') return /[A-Za-z]{2}/.test(text) && !/[\u4e00-\u9fa5]/.test(text);
+    return /[\u3041-\u3096\u30a1-\u30fa]/.test(text);
+  }
+
+  function cleanLines(text) {
+    const lines = text
+      .split(/\r?\n/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .filter(looksLikeTarget);
+    if (!lines.length) return '';
+    return cfg.lang === 'ja' ? lines.join('') : lines.join(' ');
+  }
+
   // ————— Textractor 剪贴板 —————
   // Textractor 自带的「Copy to Clipboard」扩展每出现一句新台词就写一次剪贴板，
   // 这里轮询剪贴板拿文本：不截屏、不识别，字一个不差。
@@ -930,8 +947,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       const text = (clipboard.readText() || '').trim();
       if (!text || text === lastClipboard) return;
       lastClipboard = text;
-      if (text.length < 2) return;
-      Promise.resolve(acceptText(text)).catch(() => {});
+      const payload = cleanLines(text);
+      if (payload.length < 2) return;
+      Promise.resolve(acceptText(payload)).catch(() => {});
     }, 200);
   }
 
@@ -981,9 +999,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       const text = buffer[0] === 0xff && buffer[1] === 0xfe
         ? buffer.subarray(2).toString('utf16le')
         : buffer.toString('utf8').replace(/^\uFEFF/, '');
-      const lines = text.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-      if (!lines.length) return;
-      const line = lines[lines.length - 1];
+      const line = cleanLines(text);
       if (line.length < 2) return;
       Promise.resolve(acceptText(line)).catch(() => {});
     }, 250);
