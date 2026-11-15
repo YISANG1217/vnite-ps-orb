@@ -1,17 +1,13 @@
-// 悬浮球里的「实时翻译字幕」：截屏 → OCR（PaddleOCR / Windows OCR）→ 翻译 → 底部字幕条。
+// 悬浮球里的「实时翻译字幕」：截屏 → Windows OCR → 翻译 → 底部字幕条。
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
-const { app, BrowserWindow, ipcMain, screen, desktopCapturer, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
 const { spawn } = require('node:child_process');
 const { writeFileSync, openSync, readSync, closeSync, statSync, promises: fsPromises } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
-const paddleOcr = require('./paddle-ocr.cjs');
 
 const ENGINES = new Set(['tencent', 'google', 'openai']);
-
-// 日文优先用 PaddleOCR（PP-OCR ONNX）；模型缺失或推理失败时自动回落 Windows OCR
-const USE_PADDLE_OCR = true;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -87,30 +83,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let ocrReady = false;
   let ocrBuffer = '';
   const ocrWaiters = [];
-
-  // PaddleOCR 只识别日文；连续失败三次后彻底回落到 Windows OCR，不每帧重试
-  let paddleFailures = 0;
-  let paddleWarned = false;
-
-  function paddleUsable() {
-    return USE_PADDLE_OCR && cfg.lang === 'ja' && paddleFailures < 3;
-  }
-
-  async function paddleRecognize(run) {
-    if (!paddleUsable()) return null;
-    try {
-      const result = await run();
-      if (result && Array.isArray(result.lines) && result.lines.length) return result;
-      return null;
-    } catch (error) {
-      paddleFailures += 1;
-      if (!paddleWarned) {
-        paddleWarned = true;
-        console.warn('[PS 悬浮球] PaddleOCR 失败，回落到 Windows OCR', error?.message || error);
-      }
-      return null;
-    }
-  }
 
   function stopOcr() {
     ocrReady = false;
@@ -681,19 +653,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   // 画面一直在动（动画、特效）时也至少隔 650ms 才识别一次，避免把 CPU 占满
   const OCR_MIN_GAP = 650;
 
-  // 画面流给的是 JPEG：用 Electron 自带的解码器转成 BGRA 位图，省掉额外的图片解码依赖
-  function decodeFrame(buffer) {
-    try {
-      const image = nativeImage.createFromBuffer(buffer);
-      if (image.isEmpty()) return null;
-      const size = image.getSize();
-      if (!size.width || !size.height) return null;
-      return { data: image.toBitmap(), width: size.width, height: size.height, format: 'bgra' };
-    } catch {
-      return null;
-    }
-  }
-
   function pumpCaptureOcr() {
     if (ocrBusy || !pendingFrame || !running || captureMode !== 'stream') return;
     const wait = OCR_MIN_GAP - (Date.now() - lastOcrStart);
@@ -712,14 +671,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     ocrBusy = true;
     fsPromises
       .writeFile(tempImage, buffer)
-      .then(async () => {
-        if (paddleUsable()) {
-          const bitmap = decodeFrame(buffer);
-          const result = bitmap ? await paddleRecognize(() => paddleOcr.recognizeBitmap(bitmap)) : null;
-          if (result) return result;
-        }
-        return ocrSend(tempImage, 6000);
-      })
+      .then(() => ocrSend(tempImage, 6000))
       .then(async result => {
         idleTicks = 0;
         const text = await textFromResult(result);
@@ -870,17 +822,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const width = Math.max(8, Math.round(cfg.region.width * scale));
     const height = Math.max(8, Math.round(cfg.region.height * scale));
     const masks = maskRects(scale);
-    if (paddleUsable()) {
-      // 先只抓图（复用子进程的抓屏 + 去重），PNG 交给主进程里的 PaddleOCR
-      const grabbed = await ocrSend(`grab "${tempImage}" ${x} ${y} ${width} ${height}${masks}`, 5000);
-      if (grabbed.skip) return grabbed;
-      if (grabbed.file) {
-        const result = await paddleRecognize(() => paddleOcr.recognizeFile(grabbed.file));
-        if (result) return result;
-        // 没检测到文字或推理失败：同一张 PNG 直接交给 Windows OCR，不重复抓屏
-        return ocrSend(grabbed.file, 5000);
-      }
-    }
     return ocrSend(`cap ${x} ${y} ${width} ${height}${masks}`, 5000);
   }
 
@@ -1032,7 +973,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     idleTicks = 0;
     failures = 0;
     captureFailures = 0;
-    paddleFailures = 0;
     lastOcrStart = 0;
     pendingFrame = null;
     streamReady = false;
@@ -1050,8 +990,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       startFileWatch();
     } else if (cfg.region) {
       startOcr();
-      // 提前把 ONNX 会话建好，避免第一句台词多等三百毫秒
-      if (paddleUsable()) paddleOcr.load().catch(() => {});
       captureMode = cfg.stream ? 'stream' : 'gdi';
       lastFrameAt = 0;
       if (cfg.stream) {

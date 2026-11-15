@@ -2,8 +2,6 @@
 
 # 常驻的 Windows OCR 助手：从 stdin 逐行读取命令，输出一行 JSON。
 #   cap <x> <y> <w> <h>   直接抓取屏幕区域并识别（物理像素坐标，GDI 截图）
-#   grab "<png路径>" <x> <y> <w> <h>
-#                          只抓图不识别，存成 PNG 并返回 {file,width,height}（给 PaddleOCR 用）
 #   <图片路径>            识别已有图片（系统截图回落路径）
 # 截图放在子进程里做：主进程不再周期性抓全屏、不写临时文件，鼠标才不会隔几秒卡一下。
 # 注意：必须自己写 UTF-8 字节，PowerShell 5.1 直接 Write-Output 会变成 UTF-16。
@@ -275,24 +273,6 @@ while ($true) {
         if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
         $lines = Get-Lines-From-Bitmap $bmp
         Write-Line (ConvertTo-Json-Lines $lines)
-      } finally {
-        $bmp.Dispose()
-      }
-    } elseif ($line.StartsWith('grab ')) {
-      # grab "<png 路径>" x y w h [mask...]：只抓图不识别，交给主进程的 PaddleOCR。
-      # 路径加引号，避免用户名里有空格时参数错位。
-      $match = [regex]::Match($line, '^grab\s+"([^"]+)"\s+(.+)$')
-      if (-not $match.Success) { Write-Line '{"error":"bad-grab-args"}'; continue }
-      $cap = ConvertTo-CaptureArgs ($match.Groups[2].Value.Trim() -split '\s+')
-      if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
-      $target = $match.Groups[1].Value
-      $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
-      try {
-        $state = Test-FrameChange $bmp
-        if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
-        if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
-        $bmp.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
-        Write-Line (@{ file = $target; width = $cap.W; height = $cap.H } | ConvertTo-Json -Compress)
       } finally {
         $bmp.Dispose()
       }
