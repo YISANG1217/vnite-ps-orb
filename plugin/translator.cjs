@@ -132,19 +132,28 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     });
   }
 
-  function ocrImage(file) {
+  // 向 OCR 助手发一条命令：可以是图片路径，也可以是 `cap x y w h` 直接抓屏
+  function ocrSend(command, timeout = 4000) {
     return new Promise((resolve, reject) => {
       if (!ocrReady && !ocrProc) startOcr();
       if (!ocrProc) {
         reject(new Error('ocr-unavailable'));
         return;
       }
-      const timer = setTimeout(() => reject(new Error('ocr-timeout')), 4000);
-      ocrWaiters.push({ resolve, reject, timer });
+      const waiter = { resolve, reject, timer: null };
+      waiter.timer = setTimeout(() => {
+        // 超时后必须从队列里摘掉，否则后续响应会错位给下一个请求
+        const index = ocrWaiters.indexOf(waiter);
+        if (index !== -1) ocrWaiters.splice(index, 1);
+        reject(new Error('ocr-timeout'));
+      }, timeout);
+      ocrWaiters.push(waiter);
       try {
-        ocrProc.stdin.write(`${file}\n`);
+        ocrProc.stdin.write(`${command}\n`);
       } catch (error) {
-        clearTimeout(timer);
+        clearTimeout(waiter.timer);
+        const index = ocrWaiters.indexOf(waiter);
+        if (index !== -1) ocrWaiters.splice(index, 1);
         reject(error);
       }
     });
@@ -285,22 +294,37 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     subtitleWin.loadFile(path.join(__dirname, 'subtitle.html'));
     subtitleWin.on('closed', () => {
       subtitleWin = null;
+      subtitleBounds = null;
     });
     return subtitleWin;
   }
+
+  // 位置没变就不要重复 setBounds：透明窗口每次改尺寸都会重建交换链，累积起来就是卡顿
+  let subtitleBounds = null;
 
   function placeSubtitle() {
     if (!subtitleWin || subtitleWin.isDestroyed()) return;
     const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
     const area = display.workArea;
     const width = Math.round(area.width * 0.74);
-    const height = clamp(subtitleWin.getBounds().height || 168, 96, 320);
-    subtitleWin.setBounds({
+    const height = clamp(subtitleBounds?.height || subtitleWin.getBounds().height || 168, 96, 320);
+    const next = {
       x: area.x + Math.round((area.width - width) / 2),
       y: area.y + area.height - height - Math.round(area.height * 0.055),
       width,
       height
-    }, false);
+    };
+    if (
+      subtitleBounds &&
+      next.x === subtitleBounds.x &&
+      next.y === subtitleBounds.y &&
+      next.width === subtitleBounds.width &&
+      next.height === subtitleBounds.height
+    ) {
+      return;
+    }
+    subtitleBounds = next;
+    subtitleWin.setBounds(next, false);
   }
 
   function showSubtitle(original, translated) {
@@ -350,9 +374,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     studyWin.loadFile(path.join(__dirname, 'study.html'));
     studyWin.on('closed', () => {
       studyWin = null;
+      studyBounds = null;
     });
     return studyWin;
   }
+
+  let studyBounds = null;
 
   // 伴学面板贴在游戏窗口所在屏幕的右侧，竖向居中
   function placeStudy() {
@@ -361,12 +388,23 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const area = display.workArea;
     const width = Math.min(460, Math.max(320, Math.round(area.width * 0.3)));
     const height = Math.min(680, Math.round(area.height * 0.68));
-    studyWin.setBounds({
+    const next = {
       x: area.x + area.width - width - Math.round(area.width * 0.018),
       y: area.y + Math.round((area.height - height) / 2),
       width,
       height
-    }, false);
+    };
+    if (
+      studyBounds &&
+      next.x === studyBounds.x &&
+      next.y === studyBounds.y &&
+      next.width === studyBounds.width &&
+      next.height === studyBounds.height
+    ) {
+      return;
+    }
+    studyBounds = next;
+    studyWin.setBounds(next, false);
   }
 
   function showStudy(payload) {
@@ -397,7 +435,11 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = setTimeout(tick, delay);
   }
 
-  // 只看缩略图差异：鼠标划过对话框造成的高亮/抖动不足以触发一次 OCR
+  // 默认让 OCR 助手用 GDI 直接抓区域：抓屏、比对、识别都在子进程里完成，
+  // 主进程不再每秒截一次全屏、不再写临时文件，鼠标就不会隔几秒卡一下。
+  let captureMode = 'gdi';
+  let captureFailures = 0;
+
   const SIGNATURE_WIDTH = 48;
   const DIFF_THRESHOLD = 0.035;
   const OCR_COOLDOWN = 520;
@@ -422,23 +464,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return changed / pixels;
   }
 
-  async function processFrame() {
-    const image = await grabRegion();
-    const signature = coarseSignature(image);
-    const now = Date.now();
-    // 冷却中或画面变化太小：跳过本帧，保留旧基准以便慢速变化累积
-    if (now - lastOcrAt < OCR_COOLDOWN || diffRatio(lastSignature, signature) < DIFF_THRESHOLD) {
-      idleTicks += 1;
-      return;
-    }
-    lastSignature = signature;
-    lastOcrAt = now;
-    idleTicks = 0;
-
-    writeFileSync(tempImage, image.toPNG());
-    const result = await ocrImage(tempImage);
-    const text = normalizeText(result.lines || []);
-    if (!text || text === lastText) return;
+  async function deliver(text) {
     lastText = text;
     let translated = cache.get(text);
     if (translated === undefined) {
@@ -460,6 +486,54 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
   }
 
+  // 子进程直接抓屏：只在主屏上启用，坐标才能和物理像素一一对应
+  function canCaptureInHelper() {
+    const display = screen.getDisplayMatching(cfg.region);
+    return display.bounds.x === 0 && display.bounds.y === 0;
+  }
+
+  async function captureInHelper() {
+    const display = screen.getDisplayMatching(cfg.region);
+    const scale = display.scaleFactor || 1;
+    const x = Math.round(cfg.region.x * scale);
+    const y = Math.round(cfg.region.y * scale);
+    const width = Math.max(8, Math.round(cfg.region.width * scale));
+    const height = Math.max(8, Math.round(cfg.region.height * scale));
+    return ocrSend(`cap ${x} ${y} ${width} ${height}`, 5000);
+  }
+
+  async function processFrame() {
+    if (captureMode === 'gdi' && canCaptureInHelper()) {
+      const result = await captureInHelper();
+      if (result.skip) {
+        idleTicks += 1;
+        return;
+      }
+      idleTicks = 0;
+      const text = normalizeText(result.lines || []);
+      if (text && text !== lastText) await deliver(text);
+      return;
+    }
+
+    const image = await grabRegion();
+    const signature = coarseSignature(image);
+    const now = Date.now();
+    // 冷却中或画面变化太小：跳过本帧，保留旧基准以便慢速变化累积
+    if (now - lastOcrAt < OCR_COOLDOWN || diffRatio(lastSignature, signature) < DIFF_THRESHOLD) {
+      idleTicks += 1;
+      return;
+    }
+    lastSignature = signature;
+    lastOcrAt = now;
+    idleTicks = 0;
+
+    writeFileSync(tempImage, image.toPNG());
+    const result = await ocrSend(tempImage);
+    const text = normalizeText(result.lines || []);
+    if (!text || text === lastText) return;
+    await deliver(text);
+  }
+
   async function tick() {
     loopTimer = null;
     if (!running) return;
@@ -469,12 +543,28 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       failures = 0;
     } catch (error) {
       failures += 1;
-      if (failures <= 3) console.warn('[PS 悬浮球] 字幕识别失败', error?.message || error);
+      const message = String(error?.message || '');
+      if (failures <= 3) console.warn('[PS 悬浮球] 字幕识别失败', message || error);
       lastSignature = null;
+      if (captureMode === 'gdi' && /^capture-|^bad-capture-args$|^ocr-timeout$/.test(message)) {
+        captureFailures += 1;
+        if (captureFailures >= 2) {
+          captureMode = 'electron';
+          console.warn('[PS 悬浮球] 直接截屏不可用，改用系统截图');
+        }
+      }
       if (failures === 3) stopOcr();
     }
-    // 画面长时间没变化时降频，避免每秒都做一次全屏截图
-    const backoff = idleTicks >= 3 ? Math.round(cfg.interval * 0.6) : 0;
+    // 子进程抓屏很便宜，不需要降频（降频会让新台词晚 1-3 秒才出现）；
+    // 只有回落到主进程截图时才降频，避免反复抓全屏
+    const backoff =
+      captureMode === 'electron'
+        ? idleTicks >= 10
+          ? Math.round(cfg.interval * 1.4)
+          : idleTicks >= 3
+            ? Math.round(cfg.interval * 0.6)
+            : 0
+        : 0;
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 
@@ -486,6 +576,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     lastTranslated = '';
     idleTicks = 0;
     failures = 0;
+    captureFailures = 0;
     createSubtitle();
     pushStyle();
     placeSubtitle();
@@ -586,6 +677,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const next = clamp(Math.round(Number(height) || 0), 96, 320);
     const bounds = subtitleWin.getBounds();
     if (Math.abs(bounds.height - next) < 2) return;
+    subtitleBounds = null;
     subtitleWin.setBounds({ ...bounds, y: bounds.y + bounds.height - next, height: next }, false);
   });
 
