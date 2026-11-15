@@ -11,9 +11,13 @@ contextBridge.exposeInMainWorld('psOrb', {
   dragEnd: () => ipcRenderer.send(channel('drag-end')),
   expand: () => ipcRenderer.invoke(channel('expand')),
   collapse: () => ipcRenderer.invoke(channel('collapse')),
+  setIgnore: ignore => ipcRenderer.send(channel('set-ignore'), Boolean(ignore)),
   launch: id => ipcRenderer.invoke(channel('launch'), id),
   openVnite: () => ipcRenderer.invoke(channel('open-vnite')),
   hide: () => ipcRenderer.invoke(channel('hide')),
+  onLayout: callback => {
+    ipcRenderer.on(channel('layout'), (_event, payload) => callback(payload));
+  },
   onBlur: callback => {
     ipcRenderer.on(channel('blur'), () => callback());
   },

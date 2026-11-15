@@ -3,11 +3,13 @@ const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { id: pluginId, configuration } = require('./manifest.json');
 
-const PAD = 26;
+// 窗口始终保持展开后的尺寸：展开/收起只切换面板显隐，不再改变窗口大小，
+// 这是点击悬浮球时闪动的根因。透明区域通过 setIgnoreMouseEvents 让鼠标穿透。
+const PAD = 22;
 const GAP = 16;
 const PANEL_W = 344;
 const PANEL_H = 452;
-const VISIBLE_MARGIN = 8;
+const EDGE = 8;
 
 const CHANNELS = {
   bootstrap: `${pluginId}:bootstrap`,
@@ -17,6 +19,8 @@ const CHANNELS = {
   dragEnd: `${pluginId}:drag-end`,
   expand: `${pluginId}:expand`,
   collapse: `${pluginId}:collapse`,
+  setIgnore: `${pluginId}:set-ignore`,
+  layout: `${pluginId}:layout`,
   launch: `${pluginId}:launch`,
   openVnite: `${pluginId}:open-vnite`,
   hide: `${pluginId}:hide`,
@@ -24,11 +28,14 @@ const CHANNELS = {
   forceCollapse: `${pluginId}:force-collapse`
 };
 
+const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide'];
+const LISTEN_CHANNELS = ['dragStart', 'dragMove', 'dragEnd', 'setIgnore'];
+
 const OPTION_DEFAULTS = Object.fromEntries(
   (configuration || []).map(option => [option.id, option.default])
 );
 
-const SIZES = new Set([84, 96, 112]);
+const SIZES = new Set([64, 76, 88]);
 const ACCENTS = new Set(['blue', 'violet', 'cyan']);
 
 let dispose;
@@ -42,11 +49,13 @@ async function activate(api) {
   await api.PluginDB.getValue('#all', {});
 
   const stateFile = path.join(app.getPath('userData'), 'plugins', pluginId, 'state.json');
-  let orbSize = 96;
+  let orbSize = 76;
   let accent = 'blue';
   let sound = true;
   let expanded = false;
   let orbPoint = null;
+  let anchorX = 'left';
+  let anchorY = 'bottom';
   let drag = null;
   let win = null;
 
@@ -56,7 +65,7 @@ async function activate(api) {
 
   function applyOptions(preferences) {
     const size = Number.parseInt(preferences?.size, 10);
-    orbSize = SIZES.has(size) ? size : Number.parseInt(OPTION_DEFAULTS.size, 10) || 96;
+    orbSize = SIZES.has(size) ? size : Number.parseInt(OPTION_DEFAULTS.size, 10) || 76;
     accent = ACCENTS.has(preferences?.accent) ? preferences.accent : 'blue';
     sound = preferences?.sound ?? true;
   }
@@ -64,8 +73,8 @@ async function activate(api) {
   function normalizePoint(point) {
     const area = screen.getDisplayNearestPoint(point).workArea;
     return {
-      x: clamp(Math.round(point.x), area.x + VISIBLE_MARGIN, area.x + area.width - orbSize - VISIBLE_MARGIN),
-      y: clamp(Math.round(point.y), area.y + VISIBLE_MARGIN, area.y + area.height - orbSize - VISIBLE_MARGIN)
+      x: clamp(Math.round(point.x), area.x + EDGE, area.x + area.width - orbSize - EDGE),
+      y: clamp(Math.round(point.y), area.y + EDGE, area.y + area.height - orbSize - EDGE)
     };
   }
 
@@ -95,46 +104,60 @@ async function activate(api) {
     }
   }
 
-  function collapsedBounds() {
+  // 面板朝屏幕内侧展开：悬浮球在左半屏时面板放右侧，在上半屏时面板放下方。
+  function updateAnchors() {
+    const center = { x: orbPoint.x + orbSize / 2, y: orbPoint.y + orbSize / 2 };
+    const area = screen.getDisplayNearestPoint(center).workArea;
+    anchorX = center.x < area.x + area.width / 2 ? 'right' : 'left';
+    anchorY = center.y < area.y + area.height / 2 ? 'top' : 'bottom';
+  }
+
+  // 悬浮球在窗口内的偏移由锚点决定，渲染层的 CSS 用同一套公式。
+  function orbOffset() {
     return {
-      x: orbPoint.x - PAD,
-      y: orbPoint.y - PAD,
-      width: orbSize + PAD * 2,
-      height: orbSize + PAD * 2
+      x: anchorX === 'left' ? PAD + PANEL_W + GAP : PAD,
+      y: anchorY === 'bottom' ? PAD + PANEL_H - orbSize : PAD
     };
   }
 
-  function expandedBounds() {
-    const center = { x: orbPoint.x + orbSize / 2, y: orbPoint.y + orbSize / 2 };
-    const area = screen.getDisplayNearestPoint(center).workArea;
-    const width = PAD * 2 + PANEL_W + GAP + orbSize;
-    const aboveHeight = PAD * 2 + PANEL_H;
-    const belowHeight = PAD * 2 + orbSize + GAP + PANEL_H;
-    const sideLeft = orbPoint.x - (PANEL_W + GAP + PAD) >= area.x + VISIBLE_MARGIN;
-    const aboveFits = orbPoint.y + orbSize - area.y >= aboveHeight + VISIBLE_MARGIN;
-    const vertical = aboveFits ? 'above' : 'below';
-    const height = aboveFits ? aboveHeight : belowHeight;
-    let x = sideLeft ? orbPoint.x - (width - PAD - orbSize) : orbPoint.x - PAD;
-    let y = aboveFits ? orbPoint.y + orbSize - (height - PAD) : orbPoint.y - PAD;
-    x = clamp(x, area.x + VISIBLE_MARGIN, area.x + area.width - width - VISIBLE_MARGIN);
-    y = clamp(y, area.y + VISIBLE_MARGIN, area.y + area.height - height - VISIBLE_MARGIN);
+  function windowBounds() {
+    const offset = orbOffset();
     return {
-      x: Math.round(x),
-      y: Math.round(y),
-      width,
-      height,
-      side: sideLeft ? 'left' : 'right',
-      vertical
+      x: Math.round(orbPoint.x - offset.x),
+      y: Math.round(orbPoint.y - offset.y),
+      width: PAD * 2 + PANEL_W + GAP + orbSize,
+      height: PAD * 2 + PANEL_H
     };
+  }
+
+  function cursorOverOrb() {
+    const bounds = win.getBounds();
+    const offset = orbOffset();
+    const point = screen.getCursorScreenPoint();
+    return point.x >= bounds.x + offset.x - 4 &&
+      point.x <= bounds.x + offset.x + orbSize + 4 &&
+      point.y >= bounds.y + offset.y - 4 &&
+      point.y <= bounds.y + offset.y + orbSize + 4;
+  }
+
+  function placeWindow({ persist = false } = {}) {
+    if (!win || win.isDestroyed()) return;
+    orbPoint = normalizePoint(orbPoint);
+    updateAnchors();
+    win.setBounds(windowBounds(), false);
+    if (persist) savePoint();
   }
 
   function layoutPayload(extra) {
     return {
       pad: PAD,
+      gap: GAP,
       panelWidth: PANEL_W,
       panelHeight: PANEL_H,
       orbSize,
       accent,
+      side: anchorX,
+      anchor: anchorY,
       ...extra
     };
   }
@@ -192,11 +215,18 @@ async function activate(api) {
     return projectGames(documents, settings ?? {});
   }
 
+  function revealWindow() {
+    if (!win || win.isDestroyed()) return;
+    // 鼠标正好停在球上时保持可点击，其余情况让整个透明窗口穿透。
+    win.setIgnoreMouseEvents(!cursorOverOrb(), { forward: true });
+    win.showInactive();
+  }
+
   function createWindow() {
     orbPoint = loadPoint();
-    const bounds = collapsedBounds();
+    updateAnchors();
     win = new BrowserWindow({
-      ...bounds,
+      ...windowBounds(),
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
@@ -225,12 +255,10 @@ async function activate(api) {
       /* Windows 上该调用可能被忽略，不影响置顶 */
     }
     win.loadFile(path.join(__dirname, 'orb.html'));
-    win.once('ready-to-show', () => {
-      if (win && !win.isDestroyed()) win.showInactive();
-    });
+    win.once('ready-to-show', revealWindow);
     // ready-to-show 在个别透明窗口上不触发，did-finish-load 兜底显示。
     win.webContents.once('did-finish-load', () => {
-      if (win && !win.isDestroyed() && !win.isVisible()) win.showInactive();
+      if (win && !win.isDestroyed() && !win.isVisible()) revealWindow();
     });
     win.on('blur', () => {
       if (expanded) send(CHANNELS.blur);
@@ -258,15 +286,6 @@ async function activate(api) {
     }
   }
 
-  function setCollapsedBounds() {
-    if (!win || win.isDestroyed()) return;
-    orbPoint = normalizePoint(orbPoint);
-    const bounds = collapsedBounds();
-    win.setBounds(bounds, false);
-    expanded = false;
-    savePoint();
-  }
-
   ipcMain.handle(CHANNELS.bootstrap, async event => {
     checkSender(event);
     const preferences = await readPreferences();
@@ -282,12 +301,10 @@ async function activate(api) {
     applyOptions(preferences);
     if (previousSize !== orbSize) {
       if (expanded) {
-        setCollapsedBounds();
+        expanded = false;
         send(CHANNELS.forceCollapse);
-      } else {
-        orbPoint = normalizePoint(orbPoint);
-        win.setBounds(collapsedBounds(), false);
       }
+      placeWindow({ persist: true });
     }
     const snapshot = await gameSnapshot();
     return layoutPayload({ ...snapshot, sound });
@@ -311,28 +328,33 @@ async function activate(api) {
     if (!drag || !win || win.isDestroyed() || event.sender !== win.webContents) return;
     drag = null;
     const bounds = win.getBounds();
-    orbPoint = normalizePoint({ x: bounds.x + PAD, y: bounds.y + PAD });
-    win.setBounds(collapsedBounds(), false);
+    const offset = orbOffset();
+    orbPoint = normalizePoint({ x: bounds.x + offset.x, y: bounds.y + offset.y });
+    updateAnchors();
+    // 先把新的锚点告诉渲染层，再移动窗口，避免两者不同帧导致的跳动。
+    send(CHANNELS.layout, layoutPayload({ sound }));
+    win.setBounds(windowBounds(), false);
     savePoint();
+  });
+
+  ipcMain.on(CHANNELS.setIgnore, (event, ignore) => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+    win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
   });
 
   ipcMain.handle(CHANNELS.expand, event => {
     checkSender(event);
     if (!win || win.isDestroyed()) return layoutPayload({});
-    const bounds = win.getBounds();
-    orbPoint = { x: bounds.x + PAD, y: bounds.y + PAD };
-    const laidOut = expandedBounds();
-    win.setBounds({ x: laidOut.x, y: laidOut.y, width: laidOut.width, height: laidOut.height }, false);
     expanded = true;
     // 聚焦窗口，点击桌面其它位置时才能收到 blur 并自动收起。
     win.focus();
-    return layoutPayload(laidOut);
+    return layoutPayload({});
   });
 
   ipcMain.handle(CHANNELS.collapse, event => {
     checkSender(event);
-    setCollapsedBounds();
-    return layoutPayload(collapsedBounds());
+    expanded = false;
+    return layoutPayload({});
   });
 
   ipcMain.handle(CHANNELS.launch, (event, id) => {
@@ -365,19 +387,22 @@ async function activate(api) {
 
   ipcMain.handle(CHANNELS.hide, event => {
     checkSender(event);
-    setCollapsedBounds();
-    if (win && !win.isDestroyed()) win.hide();
+    expanded = false;
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      win.hide();
+    }
     return true;
   });
 
   function toggleVisible() {
     const target = ensureWindow();
     if (target.isVisible()) {
+      expanded = false;
       send(CHANNELS.forceCollapse);
-      setCollapsedBounds();
       target.hide();
     } else {
-      target.showInactive();
+      revealWindow();
     }
   }
 
@@ -397,9 +422,8 @@ async function activate(api) {
 
   const onDisplayChange = () => {
     if (!win || win.isDestroyed()) return;
-    orbPoint = normalizePoint(orbPoint);
-    if (!expanded) win.setBounds(collapsedBounds(), false);
-    savePoint();
+    placeWindow({ persist: true });
+    if (expanded) send(CHANNELS.layout, layoutPayload({ sound }));
   };
   screen.on('display-metrics-changed', onDisplayChange);
   screen.on('display-removed', onDisplayChange);
@@ -408,14 +432,8 @@ async function activate(api) {
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);
     globalShortcut.unregister('Control+Alt+P');
-    Object.entries(CHANNELS).forEach(([key, channel]) => {
-      if (key === 'blur' || key === 'forceCollapse') return;
-      if (channel.endsWith(':drag-start') || channel.endsWith(':drag-move') || channel.endsWith(':drag-end')) {
-        ipcMain.removeAllListeners(channel);
-      } else {
-        ipcMain.removeHandler(channel);
-      }
-    });
+    INVOKE_CHANNELS.forEach(key => ipcMain.removeHandler(CHANNELS[key]));
+    LISTEN_CHANNELS.forEach(key => ipcMain.removeAllListeners(CHANNELS[key]));
     if (win && !win.isDestroyed()) {
       win.removeAllListeners('blur');
       win.destroy();

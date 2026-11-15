@@ -1,7 +1,8 @@
 :root {
   --accent: #5b9dff;
-  --orb-size: 96px;
-  --pad: 14px;
+  --orb-size: 76px;
+  --pad: 22px;
+  --gap: 16px;
   --panel-w: 344px;
   --panel-h: 452px;
 }
@@ -60,7 +61,7 @@ body {
 .orb {
   position: absolute;
   left: var(--pad);
-  top: var(--pad);
+  bottom: var(--pad);
   z-index: 2;
   display: block;
   width: var(--orb-size);
@@ -73,8 +74,19 @@ body {
   touch-action: none;
 }
 
+/* 面板在悬浮球左侧时，悬浮球贴窗口右边 */
+[data-side="left"] .orb {
+  left: calc(var(--pad) + var(--panel-w) + var(--gap));
+}
+
+/* 面板在悬浮球下方时，悬浮球贴窗口顶部 */
+[data-anchor="top"] .orb {
+  top: var(--pad);
+  bottom: auto;
+}
+
 .orb:hover {
-  transform: scale(1.045);
+  transform: scale(1.03);
 }
 
 .orb:focus {
@@ -82,22 +94,22 @@ body {
 }
 
 .orb:focus-visible .orb-shell {
-  border-color: rgba(196, 222, 255, 0.52);
+  border-color: rgba(196, 222, 255, 0.42);
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.25),
     inset 0 -14px 26px rgba(0, 0, 0, 0.6),
     0 8px 20px rgba(0, 0, 0, 0.5),
-    0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .orb.is-press {
-  transform: scale(0.93);
+  transform: scale(0.95);
   transition-duration: 0.09s;
 }
 
 .orb.is-dragging {
   cursor: grabbing;
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
 .orb-halo {
@@ -190,6 +202,8 @@ body {
 .panel {
   position: absolute;
   z-index: 3;
+  left: var(--pad);
+  top: var(--pad);
   display: flex;
   flex-direction: column;
   gap: 11px;
@@ -203,27 +217,30 @@ body {
     radial-gradient(130% 80% at 20% -18%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 60%),
     linear-gradient(180deg, rgba(13, 20, 33, 0.975), rgba(5, 8, 14, 0.99));
   box-shadow:
-    0 30px 70px rgba(0, 0, 0, 0.66),
+    0 18px 44px rgba(0, 0, 0, 0.62),
     0 0 0 1px rgba(0, 0, 0, 0.42),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   opacity: 0;
-  transform: scale(0.86);
+  transform: scale(0.88);
   transform-origin: 100% 100%;
   pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.22, 1, 0.28, 1);
+  transition: opacity 0.18s ease, transform 0.26s cubic-bezier(0.22, 1, 0.28, 1);
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 
+/* 面板在悬浮球右侧 */
 [data-side="right"] .panel {
+  left: calc(var(--pad) + var(--orb-size) + var(--gap));
   transform-origin: 0 100%;
 }
 
-[data-vertical="below"][data-side="left"] .panel {
+/* 面板在悬浮球下方 */
+[data-anchor="top"] .panel {
   transform-origin: 100% 0;
 }
 
-[data-vertical="below"][data-side="right"] .panel {
+[data-anchor="top"][data-side="right"] .panel {
   transform-origin: 0 0;
 }
 

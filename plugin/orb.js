@@ -30,8 +30,9 @@
     closing: false,
     launching: false,
     dragging: false,
-    size: 96,
-    pad: 14,
+    size: 76,
+    pad: 22,
+    gap: 16,
     panelW: 344,
     panelH: 452,
     sound: true,
@@ -95,32 +96,67 @@
   function applyLayout(payload) {
     if (!payload) return;
     if (Number(payload.pad)) state.pad = Number(payload.pad);
+    if (Number(payload.gap)) state.gap = Number(payload.gap);
     if (Number(payload.orbSize)) state.size = Number(payload.orbSize);
     if (Number(payload.panelWidth)) state.panelW = Number(payload.panelWidth);
     if (Number(payload.panelHeight)) state.panelH = Number(payload.panelHeight);
     root.style.setProperty('--pad', `${state.pad}px`);
+    root.style.setProperty('--gap', `${state.gap}px`);
     root.style.setProperty('--orb-size', `${state.size}px`);
     root.style.setProperty('--panel-w', `${state.panelW}px`);
     root.style.setProperty('--panel-h', `${state.panelH}px`);
     if (payload.accent) root.dataset.accent = payload.accent;
     if (payload.side) root.dataset.side = payload.side;
-    if (payload.vertical) root.dataset.vertical = payload.vertical;
+    if (payload.anchor) root.dataset.anchor = payload.anchor;
   }
 
-  function placeOrb({ open, width, height } = {}) {
-    const w = width || window.innerWidth;
-    const h = height || window.innerHeight;
-    const { pad, size, panelW, panelH } = state;
-    if (!open) {
-      orb.style.left = `${pad}px`;
-      orb.style.top = `${pad}px`;
+  // 透明窗口固定为展开尺寸，只有悬浮球与面板区域接收鼠标，其余区域穿透到桌面。
+  let ignoring = null;
+  const pointer = { x: -1, y: -1 };
+
+  function setIgnore(next) {
+    if (ignoring === next) return;
+    ignoring = next;
+    api.setIgnore(next);
+  }
+
+  function inside(el, x, y, grow = 0) {
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    return x >= rect.left - grow && x <= rect.right + grow && y >= rect.top - grow && y <= rect.bottom + grow;
+  }
+
+  function interactiveAt(x, y) {
+    if (inside(orb, x, y, 4)) return true;
+    return !panel.hidden && inside(panel, x, y);
+  }
+
+  function syncIgnore() {
+    if (state.dragging || press) return;
+    if (pointer.x < 0) {
+      setIgnore(true);
       return;
     }
-    orb.style.left = `${root.dataset.side === 'left' ? w - pad - size : pad}px`;
-    orb.style.top = `${root.dataset.vertical === 'above' ? h - pad - size : pad}px`;
-    panel.style.left = `${root.dataset.side === 'left' ? pad : w - pad - panelW}px`;
-    panel.style.top = `${root.dataset.vertical === 'above' ? pad : h - pad - panelH}px`;
+    setIgnore(!interactiveAt(pointer.x, pointer.y));
   }
+
+  let ignoreFrame = 0;
+
+  window.addEventListener('mousemove', event => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    if (ignoreFrame) return;
+    ignoreFrame = window.requestAnimationFrame(() => {
+      ignoreFrame = 0;
+      syncIgnore();
+    });
+  });
+
+  window.addEventListener('mouseleave', () => {
+    pointer.x = -1;
+    pointer.y = -1;
+    syncIgnore();
+  });
 
   // ————— 数据 —————
   function relative(iso) {
@@ -253,42 +289,33 @@
   // ————— 展开 / 收起 —————
   async function expand() {
     if (state.expanded || state.closing) return;
+    state.expanded = true;
     play('open');
-    let layout;
     try {
-      layout = await api.expand();
+      applyLayout(await api.expand());
     } catch (error) {
       setStatus('无法展开菜单', 'error');
-      return;
     }
-    applyLayout(layout);
-    state.expanded = true;
-    placeOrb({ open: true, width: layout?.width, height: layout?.height });
     panel.hidden = false;
     window.requestAnimationFrame(() => panel.classList.add('is-open'));
+    syncIgnore();
     await refresh();
   }
 
-  async function collapse({ silent = false } = {}) {
+  function collapse({ silent = false } = {}) {
     if (!state.expanded || state.closing) return;
     state.closing = true;
     state.launching = false;
     if (!silent) play('close');
     panel.classList.remove('is-open');
     state.expanded = false;
-    window.setTimeout(async () => {
+    Promise.resolve(api.collapse()).then(applyLayout).catch(() => {});
+    window.setTimeout(() => {
       panel.hidden = true;
       launchLayer.hidden = true;
-      let layout = null;
-      try {
-        layout = await api.collapse();
-      } catch (error) {
-        /* 窗口可能已经隐藏 */
-      }
-      applyLayout(layout);
-      placeOrb({ open: false, width: layout?.width, height: layout?.height });
       state.closing = false;
-    }, 170);
+      syncIgnore();
+    }, 180);
   }
 
   function hardCollapse() {
@@ -298,7 +325,7 @@
     panel.classList.remove('is-open');
     panel.hidden = true;
     launchLayer.hidden = true;
-    placeOrb({ open: false });
+    syncIgnore();
   }
 
   // ————— 操作 —————
@@ -390,6 +417,8 @@
     if (orb.hasPointerCapture(event.pointerId)) orb.releasePointerCapture(event.pointerId);
     if (moved) {
       api.dragEnd();
+      // 松手时指针就在球上，保持在可点击状态，等下一次移动再重新判定。
+      setIgnore(false);
       return;
     }
     play('tap');
@@ -401,6 +430,7 @@
   orb.addEventListener('pointercancel', event => {
     if (!press) return;
     press = null;
+    state.dragging = false;
     orb.classList.remove('is-press', 'is-dragging');
     if (event.pointerId !== undefined && orb.hasPointerCapture(event.pointerId)) {
       orb.releasePointerCapture(event.pointerId);
@@ -431,7 +461,7 @@
     if (event.key === 'Escape' && state.expanded) collapse();
   });
 
-  window.addEventListener('resize', () => placeOrb({ open: state.expanded }));
+  api.onLayout(payload => applyLayout(payload));
   api.onBlur(() => collapse({ silent: true }));
   api.onForceCollapse(() => hardCollapse());
 
@@ -441,9 +471,9 @@
       state.sound = data.sound !== false;
       applyLayout(data);
       render(data);
-      placeOrb({ open: false });
+      setIgnore(true);
       if (window.__PS_ORB_DEMO__) {
-        await new Promise(resolve => window.setTimeout(resolve, 280));
+        await new Promise(resolve => window.setTimeout(resolve, 320));
         await expand();
       }
     } catch (error) {
@@ -466,24 +496,29 @@
     const base = {
       games,
       total: 27,
-      orbSize: 96,
-      pad: 26,
+      orbSize: 76,
+      pad: 22,
+      gap: 16,
       panelWidth: 344,
       panelHeight: 452,
       accent: 'blue',
+      side: 'left',
+      anchor: 'bottom',
       sound: false
     };
     return {
-      bootstrap: async () => ({ ...base, width: 148, height: 148 }),
+      bootstrap: async () => base,
       games: async () => base,
-      expand: async () => ({ ...base, width: 508, height: 504, side: 'left', vertical: 'above' }),
-      collapse: async () => ({ ...base, width: 148, height: 148 }),
+      expand: async () => base,
+      collapse: async () => base,
       dragStart: () => {},
       dragMove: () => {},
       dragEnd: () => {},
+      setIgnore: () => {},
       launch: async () => ({ ok: true }),
       openVnite: async () => true,
       hide: async () => true,
+      onLayout: () => {},
       onBlur: () => {},
       onForceCollapse: () => {}
     };
