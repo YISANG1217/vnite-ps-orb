@@ -281,8 +281,10 @@ async function activate(api) {
     const previousSize = orbSize;
     applyOptions(preferences);
     if (previousSize !== orbSize) {
-      if (expanded) setCollapsedBounds();
-      else {
+      if (expanded) {
+        setCollapsedBounds();
+        send(CHANNELS.forceCollapse);
+      } else {
         orbPoint = normalizePoint(orbPoint);
         win.setBounds(collapsedBounds(), false);
       }
