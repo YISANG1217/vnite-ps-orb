@@ -187,7 +187,7 @@ async function activate(api) {
   async function gameSnapshot() {
     const [settings, documents] = await Promise.all([
       api.ConfigDB.getConfigValue('appearances').catch(() => ({})),
-      api.GameDB.getAllGames()
+      api.GameDB.getAllGames().catch(() => ({}))
     ]);
     return projectGames(documents, settings ?? {});
   }
