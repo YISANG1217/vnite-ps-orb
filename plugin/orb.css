@@ -683,6 +683,70 @@ body {
   color: #ffb8b8;
 }
 
+/* 面板底部的实时翻译开关 */
+
+.tr-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tr-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: rgba(216, 230, 248, 0.66);
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.tr-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(190, 210, 238, 0.4);
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.tr-toggle:hover {
+  color: #f2f8ff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tr-toggle.is-on {
+  color: #eef5ff;
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.tr-toggle.is-on .tr-dot {
+  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.tr-region {
+  margin-left: auto;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: rgba(216, 230, 248, 0.66);
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.tr-region:hover {
+  color: #f2f8ff;
+  border-color: rgba(140, 190, 255, 0.3);
+  background: rgba(91, 157, 255, 0.14);
+}
+
 /* 设置视图 */
 
 .settings {
@@ -695,7 +759,7 @@ body {
   gap: 2px;
 }
 
-.panel[data-view="settings"] :is(.panel-status, .hero, .panel-empty, .list-head, .list, .panel-foot) {
+.panel[data-view="settings"] :is(.panel-status, .hero, .panel-empty, .list-head, .list, .tr-bar, .panel-foot) {
   display: none;
 }
 
@@ -811,31 +875,6 @@ body {
 
 .swatches button.is-on {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent);
-}
-
-.setting-group {
-  margin-top: 10px;
-  padding: 6px 2px 2px;
-  font-size: 9.5px;
-  letter-spacing: 0.16em;
-  color: rgba(190, 210, 238, 0.42);
-}
-
-.ghost-button {
-  height: 24px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 11px;
-  color: rgba(226, 238, 255, 0.78);
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
-}
-
-.ghost-button:hover {
-  background: rgba(91, 157, 255, 0.14);
-  border-color: rgba(140, 190, 255, 0.3);
-  color: #f2f8ff;
 }
 
 .switch {

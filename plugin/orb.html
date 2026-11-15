@@ -72,6 +72,14 @@
       <div class="list-head"><span>最近游玩</span><i>RECENT</i></div>
       <ul class="list"></ul>
 
+      <div class="tr-bar">
+        <button class="tr-toggle" type="button" data-key="translate" role="switch" aria-checked="false">
+          <span class="tr-dot" aria-hidden="true"></span>
+          <span>实时翻译</span>
+        </button>
+        <button class="tr-region" type="button" data-act="region">框选区域</button>
+      </div>
+
       <footer class="panel-foot">
         <button type="button" data-act="open">打开 Vnite</button>
         <button type="button" data-act="hide">隐藏悬浮球</button>
@@ -109,13 +117,6 @@
           <button class="switch" type="button" data-key="sound" role="switch" aria-checked="true"><i></i></button>
         </div>
 
-        <div class="setting-group">字幕翻译</div>
-
-        <div class="setting">
-          <span class="setting-label">实时翻译</span>
-          <button class="switch" type="button" data-key="translate" role="switch" aria-checked="false"><i></i></button>
-        </div>
-
         <div class="setting">
           <span class="setting-label">字幕字号</span>
           <div class="segmented" data-key="fontSize">
@@ -123,11 +124,6 @@
             <button type="button" data-value="22">中</button>
             <button type="button" data-value="26">大</button>
           </div>
-        </div>
-
-        <div class="setting">
-          <span class="setting-label">识别区域</span>
-          <button class="ghost-button" type="button" data-act="region">框选区域</button>
         </div>
       </section>
 

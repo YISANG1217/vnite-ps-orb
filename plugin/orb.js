@@ -114,6 +114,7 @@
     if (typeof payload.sound === 'boolean') state.sound = payload.sound;
     if (typeof payload.translateEnabled === 'boolean') state.translate = payload.translateEnabled;
     if (Number(payload.translateFontSize)) state.fontSize = Number(payload.translateFontSize);
+    syncTranslateToggle();
   }
 
   // 透明窗口固定为展开尺寸，只有悬浮球与面板区域接收鼠标，其余区域穿透到桌面。
@@ -355,9 +356,14 @@
     settingsEl.querySelectorAll('[data-key="fontSize"] button').forEach(button => {
       button.classList.toggle('is-on', Number(button.dataset.value) === state.fontSize);
     });
-    const translateSwitch = settingsEl.querySelector('[data-key="translate"]');
-    translateSwitch.classList.toggle('is-on', state.translate);
-    translateSwitch.setAttribute('aria-checked', String(state.translate));
+    syncTranslateToggle();
+  }
+
+  function syncTranslateToggle() {
+    root.querySelectorAll('[data-key="translate"]').forEach(toggle => {
+      toggle.classList.toggle('is-on', state.translate);
+      toggle.setAttribute('aria-checked', String(state.translate));
+    });
   }
 
   async function setOption(key, value) {
@@ -412,8 +418,11 @@
         play('tap');
         setOption('translateFontSize', size);
       }
-      return;
     }
+  });
+
+  // 面板底部的实时翻译开关与框选入口
+  panel.addEventListener('click', event => {
     if (event.target.closest('[data-key="translate"]')) {
       const next = !state.translate;
       if (next) play('tap');
