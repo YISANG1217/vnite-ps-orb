@@ -322,6 +322,8 @@ async function activate(api) {
     const laidOut = expandedBounds();
     win.setBounds({ x: laidOut.x, y: laidOut.y, width: laidOut.width, height: laidOut.height }, false);
     expanded = true;
+    // 聚焦窗口，点击桌面其它位置时才能收到 blur 并自动收起。
+    win.focus();
     return layoutPayload(laidOut);
   });
 

@@ -361,7 +361,6 @@
 
   orb.addEventListener('pointerdown', event => {
     if (event.button !== 0 || state.expanded) return;
-    event.preventDefault();
     orb.setPointerCapture(event.pointerId);
     press = { x: event.clientX, y: event.clientY, moved: false, pointerId: event.pointerId };
     orb.classList.add('is-press');
@@ -407,6 +406,12 @@
       orb.releasePointerCapture(event.pointerId);
     }
     api.dragEnd();
+  });
+  orb.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (state.expanded) collapse();
+    else expand();
   });
 
   panelClose.addEventListener('click', () => collapse());
