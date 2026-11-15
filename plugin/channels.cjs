@@ -7,6 +7,7 @@ module.exports = {
     style: `${id}:tr-style`,
     resize: `${id}:tr-resize`,
     regionCommit: `${id}:tr-region-commit`,
-    regionCancel: `${id}:tr-region-cancel`
+    regionCancel: `${id}:tr-region-cancel`,
+    study: `${id}:tr-study`
   }
 };

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; font-src 'self'"
+    />
+    <title>伴学</title>
+    <link rel="stylesheet" href="study.css" />
+  </head>
+  <body>
+    <div class="card">
+      <header class="card-head">
+        <span class="badge">伴学</span>
+        <span class="head-hint">离线分词 · 自动拆句</span>
+      </header>
+
+      <section class="block">
+        <h3>原文</h3>
+        <p class="sentence" id="sentence"></p>
+      </section>
+
+      <section class="block">
+        <h3>句节</h3>
+        <ul class="chunks" id="chunks"></ul>
+      </section>
+
+      <section class="block">
+        <h3>单词</h3>
+        <ul class="words" id="words"></ul>
+      </section>
+
+      <section class="block" id="notesBlock" hidden>
+        <h3>语法点</h3>
+        <ul class="notes" id="notes"></ul>
+      </section>
+
+      <section class="block" id="transBlock" hidden>
+        <h3>参考译文</h3>
+        <p class="translation" id="translation"></p>
+      </section>
+    </div>
+    <script src="study.js"></script>
+  </body>
+</html>

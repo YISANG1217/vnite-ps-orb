@@ -1,0 +1,131 @@
+{
+  "tokens": [
+    {
+      "surface": "明日",
+      "reading": "あした",
+      "base": "",
+      "pos": "名詞",
+      "detail": "副詞可能",
+      "label": "名词",
+      "ruby": "あした"
+    },
+    {
+      "surface": "の",
+      "reading": "の",
+      "base": "",
+      "pos": "助詞",
+      "detail": "連体化",
+      "label": "助词",
+      "ruby": ""
+    },
+    {
+      "surface": "放課後",
+      "reading": "ほうかご",
+      "base": "",
+      "pos": "名詞",
+      "detail": "一般",
+      "label": "名词",
+      "ruby": "ほうかご"
+    },
+    {
+      "surface": "、",
+      "reading": "、",
+      "base": "",
+      "pos": "記号",
+      "detail": "読点",
+      "label": "符号",
+      "ruby": ""
+    },
+    {
+      "surface": "屋上",
+      "reading": "おくじょう",
+      "base": "",
+      "pos": "名詞",
+      "detail": "一般",
+      "label": "名词",
+      "ruby": "おくじょう"
+    },
+    {
+      "surface": "で",
+      "reading": "で",
+      "base": "",
+      "pos": "助詞",
+      "detail": "格助詞",
+      "label": "助词",
+      "ruby": ""
+    },
+    {
+      "surface": "待っ",
+      "reading": "まっ",
+      "base": "待つ",
+      "pos": "動詞",
+      "detail": "自立",
+      "label": "动词",
+      "ruby": "まっ"
+    },
+    {
+      "surface": "て",
+      "reading": "て",
+      "base": "",
+      "pos": "助詞",
+      "detail": "接続助詞",
+      "label": "助词",
+      "ruby": ""
+    },
+    {
+      "surface": "いる",
+      "reading": "いる",
+      "base": "",
+      "pos": "動詞",
+      "detail": "非自立",
+      "label": "动词",
+      "ruby": ""
+    },
+    {
+      "surface": "から",
+      "reading": "から",
+      "base": "",
+      "pos": "助詞",
+      "detail": "接続助詞",
+      "label": "助词",
+      "ruby": ""
+    },
+    {
+      "surface": "ね",
+      "reading": "ね",
+      "base": "",
+      "pos": "助詞",
+      "detail": "終助詞",
+      "label": "助词",
+      "ruby": ""
+    },
+    {
+      "surface": "。",
+      "reading": "。",
+      "base": "",
+      "pos": "記号",
+      "detail": "句点",
+      "label": "符号",
+      "ruby": ""
+    }
+  ],
+  "chunks": [
+    {
+      "text": "明日の放課後",
+      "role": "修饰语"
+    },
+    {
+      "text": "屋上で",
+      "role": "补语·场所"
+    },
+    {
+      "text": "待っているからね",
+      "role": "谓语·接续"
+    }
+  ],
+  "notes": [
+    "〜ている：动作正在进行，或状态的持续",
+    "〜から：因为…／从…开始"
+  ],
+  "translation": "明天放学后，我会在屋顶等你的哦。"
+}

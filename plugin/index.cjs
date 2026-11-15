@@ -549,8 +549,8 @@ async function activate(api) {
     return true;
   });
 
-  const OPTION_KEYS = new Set(['size', 'accent', 'sound', 'translateEnabled', 'translateFontSize']);
-  const BOOLEAN_OPTIONS = new Set(['sound', 'translateEnabled']);
+  const OPTION_KEYS = new Set(['size', 'accent', 'sound', 'translateEnabled', 'translateFontSize', 'translateStudy']);
+  const BOOLEAN_OPTIONS = new Set(['sound', 'translateEnabled', 'translateStudy']);
 
   // 面板里的设置项：写回插件配置，立即生效
   ipcMain.handle(CHANNELS.setOption, async (event, key, value) => {

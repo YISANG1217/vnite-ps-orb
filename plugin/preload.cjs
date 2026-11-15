@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld('psOrb', {
   onSubtitleStyle: callback => {
     ipcRenderer.on(TR.style, (_event, payload) => callback(payload));
   },
+  onStudy: callback => {
+    ipcRenderer.on(TR.study, (_event, payload) => callback(payload));
+  },
   resizeSubtitle: height => ipcRenderer.send(TR.resize, height),
   commitRegion: rect => ipcRenderer.send(TR.regionCommit, rect),
   cancelRegion: () => ipcRenderer.send(TR.regionCancel)

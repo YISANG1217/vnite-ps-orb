@@ -2,7 +2,7 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。内置实时翻译字幕：框选游戏文字区域，OCR 识别并翻译成中文显示在屏幕底部。",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
@@ -209,6 +209,16 @@
       "title": "字幕显示原文",
       "description": "在译文上方显示 OCR 识别到的原文。",
       "default": true,
+      "controlOptions": {
+        "controlType": "switch"
+      }
+    },
+    {
+      "id": "translateStudy",
+      "type": "boolean",
+      "title": "伴学面板",
+      "description": "右侧弹出离线学习面板：带振假名的原文、句节成分、逐词读音与词性、语法点。",
+      "default": false,
       "controlOptions": {
         "controlType": "switch"
       }

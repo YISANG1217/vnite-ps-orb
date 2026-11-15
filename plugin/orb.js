@@ -38,6 +38,7 @@
     panelH: 452,
     sound: true,
     translate: false,
+    study: false,
     fontSize: 22,
     hero: null,
     games: []
@@ -113,6 +114,7 @@
     if (payload.anchor) root.dataset.anchor = payload.anchor;
     if (typeof payload.sound === 'boolean') state.sound = payload.sound;
     if (typeof payload.translateEnabled === 'boolean') state.translate = payload.translateEnabled;
+    if (typeof payload.studyEnabled === 'boolean') state.study = payload.studyEnabled;
     if (Number(payload.translateFontSize)) state.fontSize = Number(payload.translateFontSize);
     syncTranslateToggle();
   }
@@ -360,9 +362,15 @@
   }
 
   function syncTranslateToggle() {
-    root.querySelectorAll('[data-key="translate"]').forEach(toggle => {
-      toggle.classList.toggle('is-on', state.translate);
-      toggle.setAttribute('aria-checked', String(state.translate));
+    const pairs = [
+      ['translate', state.translate],
+      ['study', state.study]
+    ];
+    pairs.forEach(([key, value]) => {
+      root.querySelectorAll(`[data-key="${key}"]`).forEach(toggle => {
+        toggle.classList.toggle('is-on', value);
+        toggle.setAttribute('aria-checked', String(value));
+      });
     });
   }
 
@@ -427,6 +435,12 @@
       const next = !state.translate;
       if (next) play('tap');
       setOption('translateEnabled', next);
+      return;
+    }
+    if (event.target.closest('[data-key="study"]')) {
+      const next = !state.study;
+      if (next) play('tap');
+      setOption('translateStudy', next);
       return;
     }
     if (event.target.closest('[data-act="region"]')) {

@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const { writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
+const { createAnalyzer } = require('./analyzer.cjs');
 
 const ENGINES = new Set(['tencent', 'google', 'openai']);
 
@@ -26,16 +27,21 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     fontSize: 22,
     original: true,
     interval: 1000,
+    study: false,
     region: null
   };
 
   let subtitleWin = null;
   let overlayWin = null;
+  let studyWin = null;
   let loopTimer = null;
   let running = false;
   let lastHash = '';
   let lastText = '';
+  let lastTranslated = '';
   let failures = 0;
+
+  const analyzer = createAnalyzer(path.join(__dirname, 'node_modules', 'kuromoji'));
 
   const savedRegion = readState().translateRegion;
   if (savedRegion && Number.isFinite(savedRegion.x) && Number.isFinite(savedRegion.width)) {
@@ -52,6 +58,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const fontSize = Number.parseInt(preferences?.translateFontSize, 10);
     cfg.fontSize = Number.isFinite(fontSize) ? clamp(fontSize, 14, 40) : 22;
     cfg.original = preferences?.translateOriginal !== false;
+    cfg.study = preferences?.translateStudy === true;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
   }
@@ -309,6 +316,78 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     subtitleWin.webContents.send(CH.style, { fontSize: cfg.fontSize, showOriginal: cfg.original });
   }
 
+  // ————— 伴学面板 —————
+  function createStudy() {
+    if (studyWin && !studyWin.isDestroyed()) return studyWin;
+    studyWin = new BrowserWindow({
+      width: 440,
+      height: 640,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      focusable: false,
+      alwaysOnTop: true,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        backgroundThrottling: false
+      }
+    });
+    studyWin.setAlwaysOnTop(true, 'screen-saver');
+    studyWin.setIgnoreMouseEvents(true, { forward: true });
+    studyWin.loadFile(path.join(__dirname, 'study.html'));
+    studyWin.on('closed', () => {
+      studyWin = null;
+    });
+    return studyWin;
+  }
+
+  // 伴学面板贴在游戏窗口所在屏幕的右侧，竖向居中
+  function placeStudy() {
+    if (!studyWin || studyWin.isDestroyed()) return;
+    const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
+    const area = display.workArea;
+    const width = Math.min(460, Math.max(320, Math.round(area.width * 0.3)));
+    const height = Math.min(680, Math.round(area.height * 0.68));
+    studyWin.setBounds({
+      x: area.x + area.width - width - Math.round(area.width * 0.018),
+      y: area.y + Math.round((area.height - height) / 2),
+      width,
+      height
+    }, false);
+  }
+
+  function showStudy(payload) {
+    if (!cfg.study) return;
+    const win = createStudy();
+    win.webContents.send(CH.study, payload);
+    placeStudy();
+    if (!win.isVisible()) win.showInactive();
+  }
+
+  const analysisCache = new Map();
+
+  async function analyzeLine(text, translation) {
+    let analysis = analysisCache.get(text);
+    if (!analysis) {
+      analysis = await analyzer.analyze(text);
+      if (!analysis) return;
+      analysisCache.set(text, analysis);
+      if (analysisCache.size > 60) analysisCache.delete(analysisCache.keys().next().value);
+    }
+    showStudy({ ...analysis, translation });
+  }
+
   // ————— 主循环 —————
   function schedule(delay) {
     if (!running) return;
@@ -342,7 +421,13 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
                 if (cache.size > 200) cache.delete(cache.keys().next().value);
               }
             }
+            lastTranslated = translated || '';
             showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
+            if (cfg.study) {
+              analyzeLine(text, translated || '').catch(error => {
+                console.warn('[PS 悬浮球] 分词失败', error?.message || error);
+              });
+            }
           }
         }
       }
@@ -361,11 +446,17 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     running = true;
     lastHash = '';
     lastText = '';
+    lastTranslated = '';
     failures = 0;
     createSubtitle();
     pushStyle();
     placeSubtitle();
     subtitleWin.showInactive();
+    if (cfg.study) {
+      analyzer.warmup();
+      createStudy();
+      placeStudy();
+    }
     if (cfg.region) {
       startOcr();
       schedule(120);
@@ -379,6 +470,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = null;
     stopOcr();
     if (subtitleWin && !subtitleWin.isDestroyed()) subtitleWin.hide();
+    if (studyWin && !studyWin.isDestroyed()) studyWin.hide();
     refreshTray();
   }
 
@@ -460,7 +552,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   return {
     sync(preferences) {
-      const before = { enabled: cfg.enabled, lang: cfg.lang, fontSize: cfg.fontSize, original: cfg.original, interval: cfg.interval };
+      const before = {
+        enabled: cfg.enabled,
+        lang: cfg.lang,
+        fontSize: cfg.fontSize,
+        original: cfg.original,
+        interval: cfg.interval,
+        study: cfg.study
+      };
       applyConfig(preferences);
       if (before.lang !== cfg.lang) {
         stopOcr();
@@ -468,6 +567,16 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);
+      if (before.study !== cfg.study) {
+        if (cfg.study) {
+          analyzer.warmup();
+          createStudy();
+          placeStudy();
+          if (lastText) analyzeLine(lastText, lastTranslated).catch(() => {});
+        } else if (studyWin && !studyWin.isDestroyed()) {
+          studyWin.hide();
+        }
+      }
       if (before.enabled !== cfg.enabled) {
         if (cfg.enabled) start();
         else stop();
@@ -485,7 +594,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       else stop();
     },
     isRunning: () => running,
-    info: () => ({ translateEnabled: running, translateFontSize: cfg.fontSize }),
+    info: () => ({ translateEnabled: running, translateFontSize: cfg.fontSize, studyEnabled: cfg.study }),
     openOverlay,
     dispose() {
       running = false;
@@ -495,11 +604,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeAllListeners(CH.regionCommit);
       ipcMain.removeAllListeners(CH.regionCancel);
       ipcMain.removeAllListeners(CH.resize);
-      [overlayWin, subtitleWin].forEach(target => {
+      [overlayWin, subtitleWin, studyWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });
       overlayWin = null;
       subtitleWin = null;
+      studyWin = null;
     }
   };
 }
