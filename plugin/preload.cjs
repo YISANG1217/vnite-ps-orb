@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('psOrb', {
   expand: () => ipcRenderer.invoke(channel('expand')),
   collapse: () => ipcRenderer.invoke(channel('collapse')),
   setIgnore: ignore => ipcRenderer.send(channel('set-ignore'), Boolean(ignore)),
+  contextMenu: () => ipcRenderer.send(channel('context-menu')),
   launch: id => ipcRenderer.invoke(channel('launch'), id),
   openVnite: () => ipcRenderer.invoke(channel('open-vnite')),
   hide: () => ipcRenderer.invoke(channel('hide')),
@@ -23,5 +24,8 @@ contextBridge.exposeInMainWorld('psOrb', {
   },
   onForceCollapse: callback => {
     ipcRenderer.on(channel('force-collapse'), () => callback());
+  },
+  onForceExpand: callback => {
+    ipcRenderer.on(channel('force-expand'), () => callback());
   }
 });

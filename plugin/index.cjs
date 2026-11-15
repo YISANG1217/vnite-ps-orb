@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, globalShortcut, MenuItem, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, Menu, MenuItem, Tray } = require('electron');
 const { mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { id: pluginId, configuration } = require('./manifest.json');
@@ -21,6 +21,8 @@ const CHANNELS = {
   expand: `${pluginId}:expand`,
   collapse: `${pluginId}:collapse`,
   setIgnore: `${pluginId}:set-ignore`,
+  contextMenu: `${pluginId}:context-menu`,
+  forceExpand: `${pluginId}:force-expand`,
   layout: `${pluginId}:layout`,
   launch: `${pluginId}:launch`,
   openVnite: `${pluginId}:open-vnite`,
@@ -30,7 +32,7 @@ const CHANNELS = {
 };
 
 const INVOKE_CHANNELS = ['bootstrap', 'games', 'expand', 'collapse', 'launch', 'openVnite', 'hide'];
-const LISTEN_CHANNELS = ['dragStart', 'dragMove', 'dragEnd', 'setIgnore'];
+const LISTEN_CHANNELS = ['dragStart', 'dragMove', 'dragEnd', 'setIgnore', 'contextMenu'];
 
 const OPTION_DEFAULTS = Object.fromEntries(
   (configuration || []).map(option => [option.id, option.default])
@@ -58,6 +60,7 @@ async function activate(api) {
   let anchorX = 'left';
   let anchorY = 'bottom';
   let drag = null;
+  let menuOpen = false;
   let win = null;
 
   function readPreferences() {
@@ -178,6 +181,80 @@ async function activate(api) {
     }) || null;
   }
 
+  function showVniteWindow() {
+    const target = findVniteWindow();
+    if (!target) return false;
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+    return true;
+  }
+
+  function hideFloating() {
+    expanded = false;
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      win.hide();
+    }
+    refreshTrayMenu();
+  }
+
+  function resetPosition() {
+    if (!win || win.isDestroyed()) return;
+    const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    orbPoint = normalizePoint({
+      x: area.x + area.width - orbSize - 40,
+      y: area.y + area.height - orbSize - 56
+    });
+    updateAnchors();
+    win.setBounds(windowBounds(), false);
+    savePoint();
+    send(CHANNELS.layout, layoutPayload({ sound }));
+  }
+
+  // 右键悬浮球：原生菜单，和托盘菜单风格一致。
+  function openContextMenu() {
+    if (!win || win.isDestroyed()) return;
+    const menu = Menu.buildFromTemplate([
+      {
+        label: expanded ? '收起菜单' : '展开最近游玩',
+        click: () => {
+          if (expanded) {
+            expanded = false;
+            send(CHANNELS.forceCollapse);
+          } else {
+            send(CHANNELS.forceExpand);
+          }
+        }
+      },
+      { type: 'separator' },
+      {
+        label: '打开 Vnite',
+        click: () => {
+          showVniteWindow();
+        }
+      },
+      {
+        label: '重置位置',
+        click: resetPosition
+      },
+      { type: 'separator' },
+      {
+        label: '隐藏悬浮球（Ctrl+Alt+P 唤回）',
+        click: hideFloating
+      }
+    ]);
+    menuOpen = true;
+    menu.popup({
+      window: win,
+      callback: () => {
+        menuOpen = false;
+        // 菜单关闭后把焦点还给窗口，否则之后点桌面不会再触发 blur 收起。
+        if (expanded && win && !win.isDestroyed()) win.focus();
+      }
+    });
+  }
+
   function projectGames(documents, settings) {
     const nsfwMode = Number(settings?.nsfwFilterMode ?? 0);
     const blurLevel = Number(settings?.nsfwBlurLevel ?? 0);
@@ -262,7 +339,8 @@ async function activate(api) {
       if (win && !win.isDestroyed() && !win.isVisible()) revealWindow();
     });
     win.on('blur', () => {
-      if (expanded) send(CHANNELS.blur);
+      // 右键菜单弹出时也会 blur，不能把菜单一起收掉。
+      if (expanded && !menuOpen) send(CHANNELS.blur);
     });
     win.on('closed', () => {
       win = null;
@@ -343,6 +421,11 @@ async function activate(api) {
     win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
   });
 
+  ipcMain.on(CHANNELS.contextMenu, event => {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+    openContextMenu();
+  });
+
   ipcMain.handle(CHANNELS.expand, event => {
     checkSender(event);
     if (!win || win.isDestroyed()) return layoutPayload({});
@@ -378,22 +461,12 @@ async function activate(api) {
 
   ipcMain.handle(CHANNELS.openVnite, event => {
     checkSender(event);
-    const target = findVniteWindow();
-    if (!target) return false;
-    if (target.isMinimized()) target.restore();
-    target.show();
-    target.focus();
-    return true;
+    return showVniteWindow();
   });
 
   ipcMain.handle(CHANNELS.hide, event => {
     checkSender(event);
-    expanded = false;
-    if (win && !win.isDestroyed()) {
-      win.setIgnoreMouseEvents(true, { forward: true });
-      win.hide();
-    }
-    refreshTrayMenu();
+    hideFloating();
     return true;
   });
 

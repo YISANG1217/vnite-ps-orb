@@ -437,6 +437,10 @@
     }
     api.dragEnd();
   });
+  orb.addEventListener('contextmenu', event => {
+    event.preventDefault();
+    api.contextMenu();
+  });
   orb.addEventListener('keydown', event => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
@@ -464,6 +468,9 @@
   api.onLayout(payload => applyLayout(payload));
   api.onBlur(() => collapse({ silent: true }));
   api.onForceCollapse(() => hardCollapse());
+  api.onForceExpand(() => {
+    if (!state.expanded) expand();
+  });
 
   async function init() {
     try {
@@ -515,12 +522,14 @@
       dragMove: () => {},
       dragEnd: () => {},
       setIgnore: () => {},
+      contextMenu: () => {},
       launch: async () => ({ ok: true }),
       openVnite: async () => true,
       hide: async () => true,
       onLayout: () => {},
       onBlur: () => {},
-      onForceCollapse: () => {}
+      onForceCollapse: () => {},
+      onForceExpand: () => {}
     };
   }
 })();
