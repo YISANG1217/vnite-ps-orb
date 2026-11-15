@@ -5,7 +5,7 @@ const { id: pluginId, configuration } = require('./manifest.json');
 
 // 窗口始终保持展开后的尺寸：展开/收起只切换面板显隐，不再改变窗口大小，
 // 这是点击悬浮球时闪动的根因。透明区域通过 setIgnoreMouseEvents 让鼠标穿透。
-const PAD = 22;
+const PAD = 26;
 const GAP = 16;
 const PANEL_W = 344;
 const PANEL_H = 452;
