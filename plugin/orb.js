@@ -387,7 +387,7 @@
   }
 
   orb.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || state.expanded) return;
+    if (event.button !== 0) return;
     orb.setPointerCapture(event.pointerId);
     press = { x: event.clientX, y: event.clientY, moved: false, pointerId: event.pointerId };
     orb.classList.add('is-press');
@@ -397,16 +397,20 @@
     if (!press) return;
     if (!press.moved && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4) {
       press.moved = true;
-      state.dragging = true;
-      orb.classList.add('is-dragging');
-      api.dragStart();
+      // 菜单展开时只响应点击，不拖动窗口
+      if (!state.expanded) {
+        state.dragging = true;
+        orb.classList.add('is-dragging');
+        api.dragStart();
+      }
     }
-    if (press.moved && !moveFrame) moveFrame = window.requestAnimationFrame(flushDrag);
+    if (state.dragging && !moveFrame) moveFrame = window.requestAnimationFrame(flushDrag);
   });
 
   function endPress(event) {
     if (!press) return;
     const moved = press.moved;
+    const dragged = state.dragging;
     press = null;
     state.dragging = false;
     if (moveFrame) {
@@ -415,12 +419,13 @@
     }
     orb.classList.remove('is-press', 'is-dragging');
     if (orb.hasPointerCapture(event.pointerId)) orb.releasePointerCapture(event.pointerId);
-    if (moved) {
+    if (dragged) {
       api.dragEnd();
       // 松手时指针就在球上，保持在可点击状态，等下一次移动再重新判定。
       setIgnore(false);
       return;
     }
+    if (moved) return;
     play('tap');
     if (state.expanded) collapse();
     else expand();
@@ -429,13 +434,14 @@
   orb.addEventListener('pointerup', endPress);
   orb.addEventListener('pointercancel', event => {
     if (!press) return;
+    const dragged = state.dragging;
     press = null;
     state.dragging = false;
     orb.classList.remove('is-press', 'is-dragging');
     if (event.pointerId !== undefined && orb.hasPointerCapture(event.pointerId)) {
       orb.releasePointerCapture(event.pointerId);
     }
-    api.dragEnd();
+    if (dragged) api.dragEnd();
   });
   orb.addEventListener('contextmenu', event => {
     event.preventDefault();
