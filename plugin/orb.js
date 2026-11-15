@@ -30,7 +30,7 @@
     closing: false,
     launching: false,
     dragging: false,
-    size: 76,
+    size: 64,
     pad: 22,
     gap: 16,
     panelW: 344,
@@ -496,7 +496,7 @@
     const base = {
       games,
       total: 27,
-      orbSize: 76,
+      orbSize: 64,
       pad: 22,
       gap: 16,
       panelWidth: 344,

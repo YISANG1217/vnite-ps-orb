@@ -36,7 +36,7 @@ const OPTION_DEFAULTS = Object.fromEntries(
   (configuration || []).map(option => [option.id, option.default])
 );
 
-const SIZES = new Set([64, 76, 88]);
+const SIZES = new Set([52, 64, 76]);
 const ACCENTS = new Set(['blue', 'violet', 'cyan']);
 
 let dispose;
@@ -50,7 +50,7 @@ async function activate(api) {
   await api.PluginDB.getValue('#all', {});
 
   const stateFile = path.join(app.getPath('userData'), 'plugins', pluginId, 'state.json');
-  let orbSize = 76;
+  let orbSize = 64;
   let accent = 'blue';
   let sound = true;
   let expanded = false;
@@ -66,7 +66,7 @@ async function activate(api) {
 
   function applyOptions(preferences) {
     const size = Number.parseInt(preferences?.size, 10);
-    orbSize = SIZES.has(size) ? size : Number.parseInt(OPTION_DEFAULTS.size, 10) || 76;
+    orbSize = SIZES.has(size) ? size : Number.parseInt(OPTION_DEFAULTS.size, 10) || 64;
     accent = ACCENTS.has(preferences?.accent) ? preferences.accent : 'blue';
     sound = preferences?.sound ?? true;
   }
