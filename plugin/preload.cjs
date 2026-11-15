@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld('psOrb', {
   onStudy: callback => {
     ipcRenderer.on(TR.study, (_event, payload) => callback(payload));
   },
+  onCaptureStart: callback => {
+    ipcRenderer.on(TR.captureStart, (_event, payload) => callback(payload));
+  },
+  pushCaptureFrame: buffer => ipcRenderer.send(TR.captureFrame, buffer),
+  captureFailed: reason => ipcRenderer.send(TR.captureFailed, String(reason || 'unknown')),
   resizeSubtitle: height => ipcRenderer.send(TR.resize, height),
   commitRegion: rect => ipcRenderer.send(TR.regionCommit, rect),
   cancelRegion: () => ipcRenderer.send(TR.regionCancel)

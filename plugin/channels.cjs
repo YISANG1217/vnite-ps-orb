@@ -8,6 +8,9 @@ module.exports = {
     resize: `${id}:tr-resize`,
     regionCommit: `${id}:tr-region-commit`,
     regionCancel: `${id}:tr-region-cancel`,
-    study: `${id}:tr-study`
+    study: `${id}:tr-study`,
+    captureStart: `${id}:tr-capture-start`,
+    captureFrame: `${id}:tr-capture-frame`,
+    captureFailed: `${id}:tr-capture-failed`
   }
 };

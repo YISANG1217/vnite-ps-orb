@@ -2,7 +2,7 @@
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
 const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
 const { spawn } = require('node:child_process');
-const { writeFileSync } = require('node:fs');
+const { writeFileSync, promises: fsPromises } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
@@ -33,6 +33,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let subtitleWin = null;
   let overlayWin = null;
   let studyWin = null;
+  let captureWin = null;
+  let captureSourceId = '';
+  let lastFrameAt = 0;
+  let ocrBusy = false;
+  let pendingFrame = null;
+  let pumpTimer = null;
+  let lastOcrStart = 0;
+  let streamReady = false;
   let loopTimer = null;
   let running = false;
   let lastSignature = null;
@@ -428,6 +436,148 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     showStudy({ ...analysis, translation });
   }
 
+  // ————— 持续画面流 —————
+  // 参考 Luna Translator 的思路：捕获会话只建立一次，由 GPU 持续出帧，
+  // 变化检测放在渲染进程，只有真的换台词才把那一小块图传给主进程做 OCR。
+  function sendCaptureConfig() {
+    if (!captureWin || captureWin.isDestroyed() || !captureSourceId || !cfg.region) return;
+    const display = screen.getDisplayMatching(cfg.region);
+    captureWin.webContents.send(CH.captureStart, {
+      sourceId: captureSourceId,
+      region: cfg.region,
+      origin: { x: display.bounds.x, y: display.bounds.y },
+      displayWidth: display.size.width,
+      displayHeight: display.size.height,
+      scale: display.scaleFactor || 1,
+      interval: cfg.interval
+    });
+  }
+
+  async function startCaptureStream() {
+    const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
+    if (!captureSourceId) {
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: { width: 1, height: 1 }
+        });
+        const source = sources.find(item => String(item.display_id) === String(display.id)) || sources[0];
+        captureSourceId = source?.id || '';
+      } catch (error) {
+        console.warn('[PS 悬浮球] 获取屏幕源失败', error?.message || error);
+      }
+    }
+    if (!running || !cfg.region) return false;
+    if (!captureSourceId) {
+      captureMode = 'gdi';
+      return false;
+    }
+    if (captureWin && !captureWin.isDestroyed()) {
+      sendCaptureConfig();
+      return true;
+    }
+    captureWin = new BrowserWindow({
+      x: -10,
+      y: -10,
+      width: 2,
+      height: 2,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      focusable: false,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        backgroundThrottling: false
+      }
+    });
+    // 2x2 透明窗口放在角落：页面保持“可见”，视频流才会持续出帧
+    captureWin.setOpacity(0.01);
+    captureWin.setIgnoreMouseEvents(true);
+    captureWin.loadFile(path.join(__dirname, 'capture.html'));
+    captureWin.webContents.once('did-finish-load', () => {
+      if (!captureWin || captureWin.isDestroyed()) return;
+      lastFrameAt = Date.now();
+      sendCaptureConfig();
+      captureWin.showInactive();
+    });
+    captureWin.on('closed', () => {
+      captureWin = null;
+      if (captureMode === 'stream' && running) {
+        console.warn('[PS 悬浮球] 画面流窗口关闭，改用直接截屏');
+        captureMode = 'gdi';
+        lastSignature = null;
+        lastOcrAt = 0;
+      }
+    });
+    return true;
+  }
+
+  function stopCaptureStream() {
+    if (captureWin && !captureWin.isDestroyed()) captureWin.destroy();
+    captureWin = null;
+  }
+
+  function handleCaptureFrame(event, data) {
+    if (!captureWin || event.sender !== captureWin.webContents) return;
+    if (captureMode !== 'stream' || !running) return;
+    lastFrameAt = Date.now();
+    // 空包只是心跳，说明流还活着
+    if (!data || data.length === 0) return;
+    if (!streamReady) {
+      streamReady = true;
+      console.log('[PS 悬浮球] 画面流已就绪');
+    }
+    // 只保留最新一帧，识别跟不上时自然丢中间帧
+    pendingFrame = Buffer.from(data);
+    pumpCaptureOcr();
+  }
+
+  // 画面一直在动（动画、特效）时也至少隔 650ms 才识别一次，避免把 CPU 占满
+  const OCR_MIN_GAP = 650;
+
+  function pumpCaptureOcr() {
+    if (ocrBusy || !pendingFrame || !running || captureMode !== 'stream') return;
+    const wait = OCR_MIN_GAP - (Date.now() - lastOcrStart);
+    if (wait > 0) {
+      if (!pumpTimer) {
+        pumpTimer = setTimeout(() => {
+          pumpTimer = null;
+          pumpCaptureOcr();
+        }, wait);
+      }
+      return;
+    }
+    const buffer = pendingFrame;
+    pendingFrame = null;
+    lastOcrStart = Date.now();
+    ocrBusy = true;
+    fsPromises
+      .writeFile(tempImage, buffer)
+      .then(() => ocrSend(tempImage, 6000))
+      .then(result => {
+        idleTicks = 0;
+        const text = normalizeText(result.lines || []);
+        if (text && text !== lastText) return deliver(text);
+        return undefined;
+      })
+      .catch(error => {
+        const message = String(error?.message || '');
+        if (failures < 3) console.warn('[PS 悬浮球] 字幕识别失败', message);
+      })
+      .finally(() => {
+        ocrBusy = false;
+        pumpCaptureOcr();
+      });
+  }
+
   // ————— 主循环 —————
   function schedule(delay) {
     if (!running) return;
@@ -435,9 +585,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = setTimeout(tick, delay);
   }
 
-  // 默认让 OCR 助手用 GDI 直接抓区域：抓屏、比对、识别都在子进程里完成，
-  // 主进程不再每秒截一次全屏、不再写临时文件，鼠标就不会隔几秒卡一下。
-  let captureMode = 'gdi';
+  // 默认走持续画面流；流不可用时依次回落到子进程抓屏、系统截图
+  let captureMode = 'stream';
   let captureFailures = 0;
 
   const SIGNATURE_WIDTH = 48;
@@ -538,6 +687,18 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = null;
     if (!running) return;
     const started = Date.now();
+    if (captureMode === 'stream') {
+      // 帧由渲染进程推送，这里只做存活检查：流 9 秒没动静就回落
+      if (lastFrameAt && Date.now() - lastFrameAt > 9000) {
+        console.warn('[PS 悬浮球] 画面流无响应，改用直接截屏');
+        captureMode = 'gdi';
+        lastSignature = null;
+        lastOcrAt = 0;
+        stopCaptureStream();
+      }
+      schedule(cfg.interval);
+      return;
+    }
     try {
       if (cfg.region) await processFrame();
       failures = 0;
@@ -577,6 +738,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     idleTicks = 0;
     failures = 0;
     captureFailures = 0;
+    lastOcrStart = 0;
+    pendingFrame = null;
+    streamReady = false;
     createSubtitle();
     pushStyle();
     placeSubtitle();
@@ -588,6 +752,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     if (cfg.region) {
       startOcr();
+      captureMode = 'stream';
+      lastFrameAt = 0;
+      startCaptureStream().catch(error => {
+        console.warn('[PS 悬浮球] 启动画面流失败', error?.message || error);
+        captureMode = 'gdi';
+      });
       schedule(120);
     }
     refreshTray();
@@ -597,7 +767,11 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     running = false;
     if (loopTimer) clearTimeout(loopTimer);
     loopTimer = null;
+    if (pumpTimer) clearTimeout(pumpTimer);
+    pumpTimer = null;
+    pendingFrame = null;
     stopOcr();
+    stopCaptureStream();
     if (subtitleWin && !subtitleWin.isDestroyed()) subtitleWin.hide();
     if (studyWin && !studyWin.isDestroyed()) studyWin.hide();
     refreshTray();
@@ -664,12 +838,25 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     writeState({ translateRegion: region });
     overlayWin.close();
     if (cfg.enabled && !running) start();
+    // 画面流不用重建，换一下裁剪范围就行
+    if (running && captureMode === 'stream') sendCaptureConfig();
     placeSubtitle();
   });
 
   ipcMain.on(CH.regionCancel, event => {
     if (!overlayWin || event.sender !== overlayWin.webContents) return;
     overlayWin.close();
+  });
+
+  ipcMain.on(CH.captureFrame, handleCaptureFrame);
+
+  ipcMain.on(CH.captureFailed, (event, reason) => {
+    if (!captureWin || event.sender !== captureWin.webContents) return;
+    console.warn('[PS 悬浮球] 画面流不可用，改用直接截屏', reason);
+    captureMode = 'gdi';
+    lastSignature = null;
+    lastOcrAt = 0;
+    stopCaptureStream();
   });
 
   ipcMain.on(CH.resize, (event, height) => {
@@ -732,16 +919,21 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       running = false;
       if (loopTimer) clearTimeout(loopTimer);
       loopTimer = null;
+      if (pumpTimer) clearTimeout(pumpTimer);
+      pumpTimer = null;
       stopOcr();
       ipcMain.removeAllListeners(CH.regionCommit);
       ipcMain.removeAllListeners(CH.regionCancel);
       ipcMain.removeAllListeners(CH.resize);
-      [overlayWin, subtitleWin, studyWin].forEach(target => {
+      ipcMain.removeAllListeners(CH.captureFrame);
+      ipcMain.removeAllListeners(CH.captureFailed);
+      [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });
       overlayWin = null;
       subtitleWin = null;
       studyWin = null;
+      captureWin = null;
     }
   };
 }
