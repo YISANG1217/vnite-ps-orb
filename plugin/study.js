@@ -67,6 +67,10 @@
     words.slice(0, MAX_WORDS).forEach(token => {
       const item = document.createElement('li');
       item.className = 'word';
+      item.dataset.surface = token.surface || '';
+      item.dataset.base = token.base || '';
+      item.dataset.reading = token.reading || '';
+      item.dataset.label = token.label || '';
       const surface = document.createElement('span');
       surface.className = 'surface';
       surface.textContent = token.surface;
@@ -87,6 +91,7 @@
 
   function render(payload) {
     if (bodyEl) bodyEl.scrollTop = 0;
+    closeDetail();
     renderSentence(payload.tokens || []);
     renderChunks(payload.chunks || []);
     renderWords(payload.tokens || []);
@@ -129,6 +134,8 @@
 
   cardEl?.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
+    // 点单词 / 点详情卡不要触发拖动，否则会把点击吃掉
+    if (event.target.closest('.word, .word-detail')) return;
     if (inside(gripEl, event.clientX, event.clientY)) {
       resizing = {
         x: event.screenX,
@@ -167,6 +174,56 @@
     endDrag();
     resizing = null;
   });
+
+  // ————— 单词详情：点单词查释义 —————
+  const detailEl = document.getElementById('detail');
+  const detailWordEl = document.getElementById('detailWord');
+  const detailReadingEl = document.getElementById('detailReading');
+  const detailPosEl = document.getElementById('detailPos');
+  const detailMeaningEl = document.getElementById('detailMeaning');
+  let detailKey = '';
+
+  function closeDetail() {
+    if (!detailEl) return;
+    detailEl.hidden = true;
+    detailKey = '';
+  }
+
+  wordsEl.addEventListener('click', async event => {
+    const item = event.target.closest('.word');
+    if (!item) return;
+    const data = item.dataset;
+    const key = `${data.surface}|${data.reading}|${data.base}`;
+    if (detailKey === key && !detailEl.hidden) {
+      closeDetail();
+      return;
+    }
+    detailKey = key;
+    detailEl.hidden = false;
+    detailWordEl.textContent = data.surface;
+    const extra = [
+      data.reading,
+      data.base && data.base !== data.surface ? `原形 ${data.base}` : ''
+    ].filter(Boolean).join(' · ');
+    detailReadingEl.textContent = extra;
+    detailReadingEl.hidden = !extra;
+    detailPosEl.textContent = data.label || '';
+    detailPosEl.hidden = !data.label;
+    detailMeaningEl.textContent = '查询中…';
+    detailMeaningEl.classList.add('is-loading');
+    const result = await api.lookupWord({
+      surface: data.surface,
+      base: data.base,
+      reading: data.reading,
+      pos: data.label
+    });
+    if (detailKey !== key) return;
+    detailMeaningEl.classList.remove('is-loading');
+    detailMeaningEl.textContent = result?.meaning || '未查到释义';
+    if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
+  });
+
+  document.getElementById('detailClose')?.addEventListener('click', closeDetail);
 
   api.onStudy(render);
 })();

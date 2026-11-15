@@ -407,6 +407,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   // 伴学面板：默认贴游戏屏幕右侧竖向居中；拖动/缩放后记住位置与大小
   function placeStudy() {
     if (!studyWin || studyWin.isDestroyed()) return;
+    // 拖动过程中不要重排，否则会跟 16ms 的跟随循环抢位置/尺寸
+    if (studyDrag) return;
     const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
     const area = display.workArea;
     const width = clamp(
@@ -458,7 +460,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     stopStudyDrag();
     const point = screen.getCursorScreenPoint();
     const bounds = studyWin.getBounds();
-    const drag = { dx: point.x - bounds.x, dy: point.y - bounds.y, timer: null };
+    // 尺寸固定成按下那一刻的值：每帧重新 getBounds 会被系统取整，拖久了面板会慢慢变大
+    const drag = {
+      dx: point.x - bounds.x,
+      dy: point.y - bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      timer: null
+    };
     drag.timer = setInterval(() => {
       if (!studyWin || studyWin.isDestroyed() || studyDrag !== drag) {
         stopStudyDrag();
@@ -466,13 +475,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
       const cursor = screen.getCursorScreenPoint();
       const area = screen.getDisplayNearestPoint(cursor).workArea;
-      const { width, height } = studyWin.getBounds();
       studyWin.setBounds(
         {
-          x: clamp(cursor.x - drag.dx, area.x, area.x + area.width - width),
-          y: clamp(cursor.y - drag.dy, area.y, area.y + area.height - height),
-          width,
-          height
+          x: clamp(cursor.x - drag.dx, area.x, area.x + area.width - drag.width),
+          y: clamp(cursor.y - drag.dy, area.y, area.y + area.height - drag.height),
+          width: drag.width,
+          height: drag.height
         },
         false
       );
@@ -1026,6 +1034,32 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   ipcMain.on(CH.studyDragEnd, () => stopStudyDrag());
   ipcMain.on(CH.studyResize, handleStudyResize);
 
+  // 点单词查释义：优先用词形还原后的原形查，结果按词缓存
+  const lookupCache = new Map();
+
+  async function lookupWord(payload) {
+    const surface = String(payload?.surface || '').trim().slice(0, 40);
+    if (!surface) return { meaning: '' };
+    const base = String(payload?.base || '').trim().slice(0, 40);
+    const query = base || surface;
+    let meaning = lookupCache.get(query);
+    if (meaning === undefined) {
+      meaning = await translateText(query).catch(() => '');
+      if (meaning) {
+        lookupCache.set(query, meaning);
+        if (lookupCache.size > 200) lookupCache.delete(lookupCache.keys().next().value);
+      }
+    }
+    return { meaning };
+  }
+
+  ipcMain.handle(CH.studyLookup, (event, payload) => {
+    if (!studyWin || studyWin.isDestroyed() || event.sender !== studyWin.webContents) {
+      return { meaning: '' };
+    }
+    return lookupWord(payload);
+  });
+
   ipcMain.on(CH.captureFailed, (event, reason) => {
     if (!captureWin || event.sender !== captureWin.webContents) return;
     console.warn('[PS 悬浮球] 画面流不可用，改用直接截屏', reason);
@@ -1121,6 +1155,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeAllListeners(CH.studyDragStart);
       ipcMain.removeAllListeners(CH.studyDragEnd);
       ipcMain.removeAllListeners(CH.studyResize);
+      ipcMain.removeHandler(CH.studyLookup);
       [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });

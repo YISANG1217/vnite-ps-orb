@@ -12,6 +12,7 @@ module.exports = {
     studyDragStart: `${id}:tr-study-drag-start`,
     studyDragEnd: `${id}:tr-study-drag-end`,
     studyResize: `${id}:tr-study-resize`,
+    studyLookup: `${id}:tr-study-lookup`,
     captureStart: `${id}:tr-capture-start`,
     captureFrame: `${id}:tr-capture-frame`,
     captureFailed: `${id}:tr-capture-failed`
