@@ -26,9 +26,8 @@ body {
   padding: 14px 16px 16px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.07);
-  background: linear-gradient(180deg, rgba(10, 14, 23, 0.86), rgba(6, 9, 15, 0.93));
+  background: linear-gradient(180deg, rgba(10, 14, 23, 0.92), rgba(6, 9, 15, 0.96));
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 16px 34px rgba(0, 0, 0, 0.34);
-  backdrop-filter: blur(8px);
   overflow: hidden;
   display: flex;
   flex-direction: column;

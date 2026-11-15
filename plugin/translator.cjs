@@ -2,7 +2,6 @@
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
 const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
 const { spawn } = require('node:child_process');
-const crypto = require('node:crypto');
 const { writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
@@ -36,7 +35,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let studyWin = null;
   let loopTimer = null;
   let running = false;
-  let lastHash = '';
+  let lastSignature = null;
+  let lastOcrAt = 0;
+  let idleTicks = 0;
   let lastText = '';
   let lastTranslated = '';
   let failures = 0;
@@ -279,7 +280,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
     });
     subtitleWin.setAlwaysOnTop(true, 'screen-saver');
-    subtitleWin.setIgnoreMouseEvents(true, { forward: true });
+    // 字幕窗不接收任何鼠标事件；不开 forward，避免每次鼠标移动都往渲染进程转发事件
+    subtitleWin.setIgnoreMouseEvents(true);
     subtitleWin.loadFile(path.join(__dirname, 'subtitle.html'));
     subtitleWin.on('closed', () => {
       subtitleWin = null;
@@ -344,7 +346,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
     });
     studyWin.setAlwaysOnTop(true, 'screen-saver');
-    studyWin.setIgnoreMouseEvents(true, { forward: true });
+    studyWin.setIgnoreMouseEvents(true);
     studyWin.loadFile(path.join(__dirname, 'study.html'));
     studyWin.on('closed', () => {
       studyWin = null;
@@ -395,58 +397,94 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     loopTimer = setTimeout(tick, delay);
   }
 
+  // 只看缩略图差异：鼠标划过对话框造成的高亮/抖动不足以触发一次 OCR
+  const SIGNATURE_WIDTH = 48;
+  const DIFF_THRESHOLD = 0.035;
+  const OCR_COOLDOWN = 520;
+
+  function coarseSignature(image) {
+    const size = image.getSize();
+    const height = Math.max(2, Math.round((size.height / Math.max(1, size.width)) * SIGNATURE_WIDTH));
+    return image.resize({ width: SIGNATURE_WIDTH, height }).toBitmap();
+  }
+
+  function diffRatio(previous, next) {
+    if (!previous || !next || previous.length !== next.length) return 1;
+    const pixels = next.length / 4;
+    let changed = 0;
+    for (let index = 0; index < next.length; index += 4) {
+      const delta =
+        Math.abs(next[index] - previous[index]) +
+        Math.abs(next[index + 1] - previous[index + 1]) +
+        Math.abs(next[index + 2] - previous[index + 2]);
+      if (delta > 36) changed += 1;
+    }
+    return changed / pixels;
+  }
+
+  async function processFrame() {
+    const image = await grabRegion();
+    const signature = coarseSignature(image);
+    const now = Date.now();
+    // 冷却中或画面变化太小：跳过本帧，保留旧基准以便慢速变化累积
+    if (now - lastOcrAt < OCR_COOLDOWN || diffRatio(lastSignature, signature) < DIFF_THRESHOLD) {
+      idleTicks += 1;
+      return;
+    }
+    lastSignature = signature;
+    lastOcrAt = now;
+    idleTicks = 0;
+
+    writeFileSync(tempImage, image.toPNG());
+    const result = await ocrImage(tempImage);
+    const text = normalizeText(result.lines || []);
+    if (!text || text === lastText) return;
+    lastText = text;
+    let translated = cache.get(text);
+    if (translated === undefined) {
+      translated = await translateText(text).catch(error => {
+        console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
+        return '';
+      });
+      if (translated) {
+        cache.set(text, translated);
+        if (cache.size > 200) cache.delete(cache.keys().next().value);
+      }
+    }
+    lastTranslated = translated || '';
+    showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
+    if (cfg.study) {
+      analyzeLine(text, translated || '').catch(error => {
+        console.warn('[PS 悬浮球] 分词失败', error?.message || error);
+      });
+    }
+  }
+
   async function tick() {
     loopTimer = null;
     if (!running) return;
     const started = Date.now();
     try {
-      if (cfg.region) {
-        const image = await grabRegion();
-        const hash = crypto.createHash('md5').update(image.toBitmap()).digest('hex');
-        if (hash !== lastHash) {
-          lastHash = hash;
-          writeFileSync(tempImage, image.toPNG());
-          const result = await ocrImage(tempImage);
-          const text = normalizeText(result.lines || []);
-          if (text && text !== lastText) {
-            lastText = text;
-            let translated = cache.get(text);
-            if (translated === undefined) {
-              translated = await translateText(text).catch(error => {
-                console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
-                return '';
-              });
-              if (translated) {
-                cache.set(text, translated);
-                if (cache.size > 200) cache.delete(cache.keys().next().value);
-              }
-            }
-            lastTranslated = translated || '';
-            showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
-            if (cfg.study) {
-              analyzeLine(text, translated || '').catch(error => {
-                console.warn('[PS 悬浮球] 分词失败', error?.message || error);
-              });
-            }
-          }
-        }
-      }
+      if (cfg.region) await processFrame();
       failures = 0;
     } catch (error) {
       failures += 1;
       if (failures <= 3) console.warn('[PS 悬浮球] 字幕识别失败', error?.message || error);
-      lastHash = '';
+      lastSignature = null;
       if (failures === 3) stopOcr();
     }
-    schedule(Math.max(150, cfg.interval - (Date.now() - started)));
+    // 画面长时间没变化时降频，避免每秒都做一次全屏截图
+    const backoff = idleTicks >= 3 ? Math.round(cfg.interval * 0.6) : 0;
+    schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 
   function start() {
     if (running) return;
     running = true;
-    lastHash = '';
+    lastSignature = null;
     lastText = '';
     lastTranslated = '';
+    idleTicks = 0;
     failures = 0;
     createSubtitle();
     pushStyle();
@@ -529,7 +567,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     region.width = Math.min(region.width, area.x + area.width - region.x);
     region.height = Math.min(region.height, area.y + area.height - region.y);
     cfg.region = region;
-    lastHash = '';
+    lastSignature = null;
+    lastOcrAt = 0;
     lastText = '';
     writeState({ translateRegion: region });
     overlayWin.close();
@@ -563,7 +602,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       applyConfig(preferences);
       if (before.lang !== cfg.lang) {
         stopOcr();
-        lastHash = '';
+        lastSignature = null;
+        lastText = '';
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);
