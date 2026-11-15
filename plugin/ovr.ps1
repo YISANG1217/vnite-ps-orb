@@ -143,27 +143,45 @@ function Get-Lines($stream) {
   } finally {
     $bitmap.Dispose()
   }
-  # OCR 返回的行顺序不保证是从上到下（多行对话框经常被打乱），
-  # 按行外接矩形的上边界（20px 归并同一行）、再按左边界排序，恢复阅读顺序
+  # OCR 返回的行顺序不保证是从上到下，而且同一行可能被拆成几段。
+  # 先按垂直重叠把属于同一视觉行的片段归组，组内按左边界排序，再按上边界排列各组。
   $items = @()
   foreach ($line in $result.Lines) {
     $t = $line.Text.Trim()
     if ($t -eq '') { continue }
     $top = [double]::MaxValue
     $left = [double]::MaxValue
+    $bottom = [double]::MinValue
     foreach ($word in $line.Words) {
       $rect = $word.BoundingRect
       if ($rect.Top -lt $top) { $top = $rect.Top }
       if ($rect.Left -lt $left) { $left = $rect.Left }
+      if ($rect.Bottom -gt $bottom) { $bottom = $rect.Bottom }
     }
-    if ($top -eq [double]::MaxValue) { $top = 0; $left = 0 }
-    $items += [pscustomobject]@{ Text = $t; Top = $top; Left = $left }
+    if ($top -eq [double]::MaxValue) { $top = 0; $left = 0; $bottom = 1 }
+    $items += [pscustomobject]@{ Text = $t; Top = $top; Left = $left; Bottom = $bottom }
   }
-  $lines = @(
-    $items |
-      Sort-Object -Property @{ Expression = { [int][Math]::Round($_.Top / 20) } }, @{ Expression = { $_.Left } } |
-      ForEach-Object { $_.Text }
-  )
+  $rows = @()
+  foreach ($item in ($items | Sort-Object Top)) {
+    $height = [Math]::Max(1, $item.Bottom - $item.Top)
+    $target = $null
+    foreach ($row in $rows) {
+      $overlap = [Math]::Min($row.Bottom, $item.Bottom) - [Math]::Max($row.Top, $item.Top)
+      if ($overlap -gt 0.5 * [Math]::Min($row.Height, $height)) { $target = $row; break }
+    }
+    if ($target) {
+      $target.Items += $item
+      $target.Top = [Math]::Min($target.Top, $item.Top)
+      $target.Bottom = [Math]::Max($target.Bottom, $item.Bottom)
+      $target.Height = [Math]::Max(1, $target.Bottom - $target.Top)
+    } else {
+      $rows += [pscustomobject]@{ Top = $item.Top; Bottom = $item.Bottom; Height = $height; Items = @($item) }
+    }
+  }
+  $lines = @()
+  foreach ($row in ($rows | Sort-Object Top)) {
+    $lines += (($row.Items | Sort-Object Left | ForEach-Object { $_.Text }) -join '')
+  }
   return ,$lines
 }
 

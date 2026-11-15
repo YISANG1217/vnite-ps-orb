@@ -185,6 +185,15 @@ function createAnalyzer(kuromojiDir) {
     return notes;
   }
 
+  // OCR 常把长音符「ー」认成「一 / エ / 工」，夹在假名中间时直接改回来
+  async function correct(text) {
+    if (!text) return text;
+    return text.replace(
+      /([\u3041-\u3096\u30a1-\u30fa])[一エ工](?=[\u3041-\u3096\u30a1-\u30fa、。！？…」])/g,
+      '$1ー'
+    );
+  }
+
   return {
     async analyze(text) {
       if (!text) return null;
@@ -196,6 +205,7 @@ function createAnalyzer(kuromojiDir) {
         notes: buildNotes(tokens)
       };
     },
+    correct,
     warmup() {
       load().catch(() => {});
     }

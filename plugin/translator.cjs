@@ -656,10 +656,10 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     fsPromises
       .writeFile(tempImage, buffer)
       .then(() => ocrSend(tempImage, 6000))
-      .then(result => {
+      .then(async result => {
         idleTicks = 0;
-        const text = normalizeText(result.lines || []);
-        if (text) return acceptText(text);
+        const text = await textFromResult(result);
+        if (text) await acceptText(text);
         return undefined;
       })
       .catch(error => {
@@ -828,6 +828,13 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return ocrSend(`cap ${x} ${y} ${width} ${height}${maskRects(scale)}`, 5000);
   }
 
+  // OCR 行 → 文本：先拼接，再用词典把浊点误读纠回来（ブ↔プ、が↔か）
+  async function textFromResult(result) {
+    const raw = normalizeText(result.lines || []);
+    if (!raw) return '';
+    return analyzer.correct(raw).catch(() => raw);
+  }
+
   async function processFrame() {
     if (captureMode === 'gdi' && canCaptureInHelper()) {
       const result = await captureInHelper();
@@ -836,7 +843,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         return;
       }
       idleTicks = 0;
-      const text = normalizeText(result.lines || []);
+      const text = await textFromResult(result);
       if (text) await acceptText(text);
       return;
     }
@@ -855,7 +862,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
     writeFileSync(tempImage, image.toPNG());
     const result = await ocrSend(tempImage);
-    const text = normalizeText(result.lines || []);
+    const text = await textFromResult(result);
     if (!text) return;
     await acceptText(text);
   }
