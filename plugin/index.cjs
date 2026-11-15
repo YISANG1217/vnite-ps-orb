@@ -356,6 +356,8 @@ async function activate(api) {
       if (win && !win.isDestroyed() && !win.isVisible()) revealWindow();
     });
     win.on('blur', () => {
+      // 失焦时渲染层收不到 pointerup，先停掉拖动跟随。
+      stopDrag();
       // 右键菜单弹出时也会 blur，不能把菜单一起收掉。
       if (expanded && !menuOpen) send(CHANNELS.blur);
     });
@@ -406,23 +408,41 @@ async function activate(api) {
     return layoutPayload({ ...snapshot, sound });
   });
 
+  // 拖动时由主进程按光标位置跟随：渲染层的 pointermove 在快速拖动时
+  // 会因光标短暂跑出窗口而中断，导致悬浮球跟不上手（漂移）。
+  function followCursor() {
+    if (!drag || !win || win.isDestroyed()) return;
+    const point = screen.getCursorScreenPoint();
+    const x = Math.round(drag.origin.x + point.x - drag.cursor.x);
+    const y = Math.round(drag.origin.y + point.y - drag.cursor.y);
+    const bounds = win.getBounds();
+    if (bounds.x === x && bounds.y === y) return;
+    win.setPosition(x, y);
+  }
+
+  function stopDrag() {
+    if (drag?.timer) clearInterval(drag.timer);
+    drag = null;
+  }
+
   ipcMain.on(CHANNELS.dragStart, event => {
     if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
-    drag = { origin: win.getBounds(), cursor: screen.getCursorScreenPoint() };
+    stopDrag();
+    drag = {
+      origin: win.getBounds(),
+      cursor: screen.getCursorScreenPoint(),
+      timer: setInterval(followCursor, 16)
+    };
   });
 
   ipcMain.on(CHANNELS.dragMove, event => {
     if (!drag || !win || win.isDestroyed() || event.sender !== win.webContents) return;
-    const point = screen.getCursorScreenPoint();
-    win.setPosition(
-      Math.round(drag.origin.x + point.x - drag.cursor.x),
-      Math.round(drag.origin.y + point.y - drag.cursor.y)
-    );
+    followCursor();
   });
 
   ipcMain.on(CHANNELS.dragEnd, event => {
     if (!drag || !win || win.isDestroyed() || event.sender !== win.webContents) return;
-    drag = null;
+    stopDrag();
     const bounds = win.getBounds();
     const offset = orbOffset();
     orbPoint = normalizePoint({ x: bounds.x + offset.x, y: bounds.y + offset.y });
@@ -685,7 +705,7 @@ async function activate(api) {
       win.destroy();
     }
     win = null;
-    drag = null;
+    stopDrag();
     orbPoint = null;
   };
 }

@@ -2,7 +2,7 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。隐藏后可从 Vnite 托盘菜单重新唤出。",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
