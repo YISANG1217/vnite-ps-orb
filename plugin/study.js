@@ -10,9 +10,15 @@
 
   if (!api) return;
 
-  const MAX_WORDS = 28;
+  // 只列实词，一般一句 3–8 个；上限留一点余量，避免长定语句把面板撑爆
+  const MAX_WORDS = 12;
   const MAX_CHUNKS = 8;
   const MAX_NOTES = 4;
+
+  // 只有实词值得记：助词、助动词只是语法零件，逐条标意思反而全是噪声
+  const CONTENT_POS = new Set(['名詞', '動詞', '形容詞', '形容動詞', '副詞', '連体詞', '接続詞', '感動詞', '接頭詞']);
+  // 每次渲染递增，异步查到的释义只往当前这一屏里填
+  let renderSeq = 0;
 
   function empty(text) {
     const item = document.createElement('li');
@@ -59,12 +65,15 @@
 
   function renderWords(tokens) {
     wordsEl.textContent = '';
-    const words = tokens.filter(token => token.pos !== '記号');
-    if (!words.length) {
-      wordsEl.appendChild(empty('未识别到单词'));
-      return;
-    }
-    words.slice(0, MAX_WORDS).forEach(token => {
+    const entries = [];
+    const seen = new Set();
+    tokens.forEach(token => {
+      if (entries.length >= MAX_WORDS) return;
+      if (!CONTENT_POS.has(token.pos)) return;
+      const key = token.base || token.surface;
+      // 同一句里重复出现的词只列一次
+      if (!key || seen.has(key)) return;
+      seen.add(key);
       const item = document.createElement('li');
       item.className = 'word';
       item.dataset.surface = token.surface || '';
@@ -86,15 +95,53 @@
       pos.textContent = token.label;
       item.appendChild(pos);
       wordsEl.appendChild(item);
+      entries.push({ item, token });
     });
+    if (!entries.length) {
+      wordsEl.appendChild(empty('本句没有需要记的实词'));
+      return [];
+    }
+    return entries;
+  }
+
+  // 逐词补中文释义：走和字幕同一套翻译接口，结果在主进程里按词缓存，
+  // 常用词第一次查过之后就不再发请求了。并发 3，避免一次涌出十几个请求。
+  async function fillMeanings(entries, seq) {
+    const queue = entries.slice();
+    if (!queue.length) return;
+    const worker = async () => {
+      while (queue.length) {
+        if (seq !== renderSeq) return;
+        const entry = queue.shift();
+        const result = await api
+          .lookupWord({
+            surface: entry.token.surface,
+            base: entry.token.base,
+            reading: entry.token.reading,
+            pos: entry.token.label
+          })
+          .catch(() => null);
+        if (seq !== renderSeq) return;
+        const meaning = String(result?.meaning || '').trim();
+        if (!meaning) continue;
+        const span = document.createElement('span');
+        span.className = 'meaning';
+        span.textContent = meaning;
+        entry.item.appendChild(span);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, entries.length) }, worker));
   }
 
   function render(payload) {
+    renderSeq += 1;
+    const seq = renderSeq;
     if (bodyEl) bodyEl.scrollTop = 0;
     closeDetail();
     renderSentence(payload.tokens || []);
     renderChunks(payload.chunks || []);
-    renderWords(payload.tokens || []);
+    const entries = renderWords(payload.tokens || []);
+    fillMeanings(entries, seq);
 
     notesEl.textContent = '';
     const notes = (payload.notes || []).slice(0, MAX_NOTES);
