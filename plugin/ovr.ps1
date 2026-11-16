@@ -19,6 +19,81 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name 'Dpi' -Namespace 'PsOrb'
 [PsOrb.Dpi]::SetProcessDPIAware() | Out-Null
 
+# Otsu 自适应二值化：逐像素处理放进编译好的 C#，比 PowerShell 循环快两个数量级。
+# 半透明对话框后面的立绘和背景会把 Windows OCR 带偏，先二值化把文字剥出来。
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+namespace PsOrb {
+  public static class Binarizer {
+    public static Bitmap Run(Bitmap src, double scale) {
+      int w = Math.Max(8, (int)Math.Round(src.Width * scale));
+      int h = Math.Max(8, (int)Math.Round(src.Height * scale));
+      Bitmap up = new Bitmap(w, h, PixelFormat.Format24bppRgb);
+      using (Graphics g = Graphics.FromImage(up)) {
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.Clear(Color.Black);
+        g.DrawImage(src, 0, 0, w, h);
+      }
+      BitmapData data = up.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format24bppRgb);
+      try {
+        int stride = data.Stride;
+        int bytes = stride * h;
+        byte[] buf = new byte[bytes];
+        Marshal.Copy(data.Scan0, buf, 0, bytes);
+        int[] hist = new int[256];
+        byte[] gray = new byte[w * h];
+        long sum = 0;
+        for (int y = 0; y < h; y++) {
+          int row = y * stride;
+          for (int x = 0; x < w; x++) {
+            int i = row + x * 3;
+            int v = (buf[i] * 29 + buf[i + 1] * 150 + buf[i + 2] * 77) >> 8;
+            gray[y * w + x] = (byte)v;
+            hist[v]++;
+            sum += v;
+          }
+        }
+        long total = (long)w * h;
+        long sumB = 0;
+        long wB = 0;
+        double maxVar = -1.0;
+        int thr = 128;
+        for (int t = 0; t < 256; t++) {
+          wB += hist[t];
+          if (wB == 0) continue;
+          long wF = total - wB;
+          if (wF == 0) break;
+          sumB += (long)t * hist[t];
+          double mB = (double)sumB / wB;
+          double mF = (double)(sum - sumB) / wF;
+          double v = (double)wB * wF * (mB - mF) * (mB - mF);
+          if (v > maxVar) { maxVar = v; thr = t; }
+        }
+        // 白字黑底是 VN 的常态：阈值略抬高，把描边留在黑色一侧
+        int cut = Math.Min(250, thr + 18);
+        for (int i = 0; i < gray.Length; i++) {
+          byte val = gray[i] >= cut ? (byte)255 : (byte)0;
+          int j = (i / w) * stride + (i % w) * 3;
+          buf[j] = val;
+          buf[j + 1] = val;
+          buf[j + 2] = val;
+        }
+        Marshal.Copy(buf, 0, data.Scan0, bytes);
+      } finally {
+        up.UnlockBits(data);
+      }
+      return up;
+    }
+  }
+}
+"@
+
 # 识别进程降为低于正常优先级：OCR 的那一下不会和游戏抢 CPU，鼠标就不会顿
 try {
   [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
@@ -120,42 +195,18 @@ function Get-OcrBitmap($bmp) {
   return $scaled
 }
 
-# 第二套预处理：灰度 + 对比度拉伸 + 2 倍放大。
-# Windows OCR 对小字、彩色背景上的字幕最不稳定，灰度化能去掉背景色干扰，
-# 提高倍率则让假名的浊点、长音这些细节更容易被分出来。
+# 第二套预处理：2 倍放大 + Otsu 自适应二值化。
+# VN 的对话框是半透明的，台词后面就是立绘和背景，Windows OCR 会被这些杂色带偏；
+# 二值化把文字从背景里剥出来后，同一句台词从乱码变成几乎全对（实测只剩一个促音之差）。
 function Get-OcrBitmapEnhanced($bmp) {
-  $pixelBudget = 2000000
   $area = [double]$bmp.Width * [double]$bmp.Height
   $scale = 2.0
-  if ($area -gt 0) { $scale = [Math]::Min(2.0, [Math]::Sqrt($pixelBudget / $area)) }
+  if ($area -gt 0) { $scale = [Math]::Min(2.5, [Math]::Sqrt(2400000 / $area)) }
   if ($scale -lt 1.2) { $scale = 1.2 }
-  $w = [int][Math]::Max(8, [Math]::Round($bmp.Width * $scale))
-  $h = [int][Math]::Max(8, [Math]::Round($bmp.Height * $scale))
-  $out = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-  $g = [System.Drawing.Graphics]::FromImage($out)
-  $attrs = New-Object System.Drawing.Imaging.ImageAttributes
-  try {
-    $g.Clear([System.Drawing.Color]::Black)
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $m = New-Object System.Drawing.Imaging.ColorMatrix
-    $m.Matrix00 = 0.34; $m.Matrix01 = 0.34; $m.Matrix02 = 0.34
-    $m.Matrix10 = 0.34; $m.Matrix11 = 0.34; $m.Matrix12 = 0.34
-    $m.Matrix20 = 0.34; $m.Matrix21 = 0.34; $m.Matrix22 = 0.34
-    $m.Matrix33 = 1.0
-    $m.Matrix40 = -0.18; $m.Matrix41 = -0.18; $m.Matrix42 = -0.18
-    $attrs.SetColorMatrix($m)
-    $attrs.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
-    $rect = New-Object System.Drawing.Rectangle(0, 0, $w, $h)
-    $g.DrawImage($bmp, $rect, 0, 0, $bmp.Width, $bmp.Height, [System.Drawing.GraphicsUnit]::Pixel, $attrs)
-  } finally {
-    $g.Dispose()
-    $attrs.Dispose()
-  }
-  return $out
+  return [PsOrb.Binarizer]::Run($bmp, $scale)
 }
 
-# 位图 → BMP 内存流 → 识别；-Enhanced 使用灰度增强那一套
+# 位图 → BMP 内存流 → 识别；-Enhanced 走二值化那一套
 function Get-Lines-From-Bitmap($bmp, [switch]$Enhanced) {
   if ($Enhanced) {
     $ocrBmp = Get-OcrBitmapEnhanced $bmp
@@ -346,17 +397,17 @@ while ($true) {
         if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
         if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
         if ($state -eq 'wait') { Write-Line '{"wait":true}'; continue }
-        $first = Get-Lines-From-Bitmap $bmp
+        $first = Get-Lines-From-Bitmap $bmp -Enhanced
         $lines = @($first.Lines)
         $blocks = @($first.Blocks)
-        # 第一遍结果里混进半角字母/数字，基本就是认错假名了：再用灰度增强版复核一次。
+        # 二值化结果为空或混进半角字母/数字（认错假名的典型征兆）时，再用原图复核一次。
         # 正常日文台词不跑第二遍，避免长文本识别时间翻倍。
         $joined = ($lines -join '')
         $alt = @()
         $altBlocks = @()
-        if ($joined -match '[A-Za-z0-9]') {
+        if ($joined.Trim() -eq '' -or $joined -match '[A-Za-z0-9]') {
           try {
-            $second = Get-Lines-From-Bitmap $bmp -Enhanced
+            $second = Get-Lines-From-Bitmap $bmp
             $alt = @($second.Lines)
             $altBlocks = @($second.Blocks)
           } catch {
@@ -378,15 +429,15 @@ while ($true) {
       $bmp = $null
       try {
         $bmp = [System.Drawing.Bitmap]::FromFile($line)
-        $first = Get-Lines-From-Bitmap $bmp
+        $first = Get-Lines-From-Bitmap $bmp -Enhanced
         $lines = @($first.Lines)
         $blocks = @($first.Blocks)
         $joined = ($lines -join '')
         $alt = @()
         $altBlocks = @()
-        if ($joined -match '[A-Za-z0-9]') {
+        if ($joined.Trim() -eq '' -or $joined -match '[A-Za-z0-9]') {
           try {
-            $second = Get-Lines-From-Bitmap $bmp -Enhanced
+            $second = Get-Lines-From-Bitmap $bmp
             $alt = @($second.Lines)
             $altBlocks = @($second.Blocks)
           } catch {
