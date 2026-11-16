@@ -1,38 +1,13 @@
 // 悬浮球里的「实时翻译字幕」：截屏 → Windows OCR → 翻译 → 底部字幕条。
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
-const { app, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
 const { spawn } = require('node:child_process');
-const { writeFileSync, appendFileSync, openSync, readSync, closeSync, statSync, promises: fsPromises } = require('node:fs');
+const { writeFileSync, appendFileSync } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
 
 const ENGINES = new Set(['tencent', 'google', 'openai']);
-
-// Vnite 存下拉框可能是 value、标签文字，个别版本还会存选项序号，这里全部认。
-const SOURCE_VALUES = ['ocr', 'textractor', 'clipboard'];
-const SOURCE_ALIASES = {
-  ocr: 'ocr',
-  textractor: 'textractor',
-  clipboard: 'clipboard',
-  '0': 'ocr',
-  '1': 'textractor',
-  '2': 'clipboard',
-  截图识别: 'ocr',
-  截图识别OCR: 'ocr',
-  截图识别ocr: 'ocr',
-  'textractor文本文件': 'textractor',
-  'textractor剪贴板': 'clipboard'
-};
-
-function resolveSource(raw) {
-  if (Array.isArray(raw)) raw = raw[0];
-  if (raw && typeof raw === 'object') raw = raw.value ?? raw.label ?? '';
-  const key = String(raw == null ? '' : raw).trim().toLowerCase().replace(/\s+/g, '');
-  if (!key) return 'ocr';
-  if (SOURCE_VALUES.includes(key)) return key;
-  return SOURCE_ALIASES[key] || 'ocr';
-}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -41,8 +16,8 @@ function clamp(value, min, max) {
 function createTranslator({ api, stateFile, readState, writeState, refreshTray, defaults }) {
   const tempImage = path.join(app.getPath('temp'), 'local-vnite-ps-orb-ocr.png');
 
-  // 诊断日志：设置里选了剪贴板却还在跑 OCR 时，看这个文件就能知道实际生效的取词方式。
-  function clipLog(line) {
+  // 诊断日志：OCR 出错时把两份识别结果写进 translate.log，方便对照调参。
+  function debugLog(line) {
     try {
       appendFileSync(path.join(path.dirname(stateFile), 'translate.log'), `${new Date().toISOString()} ${line}\n`);
     } catch {
@@ -62,9 +37,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     interval: 1000,
     study: false,
     stream: false,
-    source: 'ocr',
-    rawSource: '',
-    textFile: '',
     region: null
   };
 
@@ -87,7 +59,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let lastText = '';
   let lastTranslated = '';
   let failures = 0;
-  let lastRawSource = null;
 
   const analyzer = createAnalyzer(path.join(__dirname, 'node_modules', 'kuromoji'));
 
@@ -107,9 +78,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.fontSize = Number.isFinite(fontSize) ? clamp(fontSize, 14, 40) : 22;
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
-    cfg.source = resolveSource(preferences?.translateSource);
-    cfg.rawSource = preferences?.translateSource;
-    cfg.textFile = String(preferences?.translateTextFile || '').trim();
     cfg.stream = preferences?.translateStream === true;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
@@ -916,7 +884,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const alt = altRaw ? await analyzer.correct(altRaw).catch(() => altRaw) : '';
     const text = pickBetter(base, alt);
     if (alt && alt !== base) {
-      clipLog(
+      debugLog(
         `ocr base=${JSON.stringify(base.slice(0, 40))} alt=${JSON.stringify(alt.slice(0, 40))} pick=${text === alt ? 'alt' : 'base'}`
       );
     }
@@ -958,7 +926,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   async function tick() {
     loopTimer = null;
-    if (!running || cfg.source !== 'ocr') return;
+    if (!running) return;
     const started = Date.now();
     if (captureMode === 'stream') {
       // 帧由渲染进程推送，这里只做存活检查：流 9 秒没动静就回落
@@ -1002,102 +970,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 
-  // 剪贴板/文件里会混进 Textractor 自己的报错（「翻译时出错」「Text threads」等），
-  // 只保留确实像目标语言台词的行，避免这些噪音进字幕。
-  function looksLikeTarget(text) {
-    if (cfg.lang === 'en') return /[A-Za-z]{2}/.test(text) && !/[\u4e00-\u9fa5]/.test(text);
-    return /[\u3041-\u3096\u30a1-\u30fa]/.test(text);
-  }
-
-  function cleanLines(text) {
-    const lines = text
-      .split(/\r?\n/)
-      .map(item => item.trim())
-      .filter(Boolean)
-      .filter(looksLikeTarget);
-    if (!lines.length) return '';
-    return cfg.lang === 'ja' ? lines.join('') : lines.join(' ');
-  }
-
-  // ————— Textractor 剪贴板 —————
-  // Textractor 自带的「Copy to Clipboard」扩展每出现一句新台词就写一次剪贴板，
-  // 这里轮询剪贴板拿文本：不截屏、不识别，字一个不差。
-  let clipboardTimer = null;
-  let lastClipboard = '';
-
-  function stopClipWatch() {
-    if (clipboardTimer) clearInterval(clipboardTimer);
-    clipboardTimer = null;
-  }
-
-  function startClipWatch() {
-    stopClipWatch();
-    lastClipboard = (clipboard.readText() || '').trim();
-    clipLog(`start source=${cfg.source} initial=${JSON.stringify(lastClipboard.slice(0, 40))}`);
-    clipboardTimer = setInterval(() => {
-      if (!running || cfg.source !== 'clipboard') return;
-      const text = (clipboard.readText() || '').trim();
-      if (!text || text === lastClipboard) return;
-      lastClipboard = text;
-      const payload = cleanLines(text);
-      clipLog(`clip raw=${JSON.stringify(text.slice(0, 50))} kept=${JSON.stringify(payload.slice(0, 50))}`);
-      if (payload.length < 2) return;
-      Promise.resolve(acceptText(payload)).catch(() => {});
-    }, 200);
-  }
-
-  // ————— Textractor 文本文件 —————
-  // Textractor 的「保存文本到文件」扩展会把每次新台词追加到文件末尾，
-  // 这里只读新增的字节，取最后一行直接送翻译：零识别错误、零截屏开销。
-  let fileTimer = null;
-  let fileOffset = 0;
-
-  function stopFileWatch() {
-    if (fileTimer) clearInterval(fileTimer);
-    fileTimer = null;
-    fileOffset = 0;
-  }
-
-  function startFileWatch() {
-    stopFileWatch();
-    if (!cfg.textFile) {
-      console.warn('[PS 悬浮球] 未设置 Textractor 文本文件路径');
-      return;
-    }
-    try {
-      // 从当前末尾开始，避免把历史台词全部念一遍
-      fileOffset = statSync(cfg.textFile).size;
-    } catch {
-      fileOffset = 0;
-    }
-    fileTimer = setInterval(() => {
-      if (!running || cfg.source !== 'textractor') return;
-      let stat;
-      try {
-        stat = statSync(cfg.textFile);
-      } catch {
-        return;
-      }
-      if (stat.size < fileOffset) fileOffset = 0;
-      if (stat.size <= fileOffset) return;
-      const start = stat.size - fileOffset > 65536 ? stat.size - 65536 : fileOffset;
-      const buffer = Buffer.alloc(stat.size - start);
-      const fd = openSync(cfg.textFile, 'r');
-      try {
-        readSync(fd, buffer, 0, buffer.length, start);
-      } finally {
-        closeSync(fd);
-      }
-      fileOffset = stat.size;
-      const text = buffer[0] === 0xff && buffer[1] === 0xfe
-        ? buffer.subarray(2).toString('utf16le')
-        : buffer.toString('utf8').replace(/^\uFEFF/, '');
-      const line = cleanLines(text);
-      if (line.length < 2) return;
-      Promise.resolve(acceptText(line)).catch(() => {});
-    }, 250);
-  }
-
   function start() {
     if (running) return;
     running = true;
@@ -1119,12 +991,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       createStudy();
       placeStudy();
     }
-    if (cfg.source === 'clipboard') {
-      startClipWatch();
-    } else if (cfg.source === 'textractor') {
-      // 取词来自文本文件，不需要截屏识别
-      startFileWatch();
-    } else if (cfg.region) {
+    if (cfg.region) {
       startOcr();
       captureMode = cfg.stream ? 'stream' : 'gdi';
       lastFrameAt = 0;
@@ -1146,8 +1013,6 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     if (pumpTimer) clearTimeout(pumpTimer);
     pumpTimer = null;
     pendingFrame = null;
-    stopClipWatch();
-    stopFileWatch();
     stopOcr();
     stopCaptureStream();
     if (subtitleWin && !subtitleWin.isDestroyed()) subtitleWin.hide();
@@ -1285,25 +1150,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         original: cfg.original,
         interval: cfg.interval,
         study: cfg.study,
-        stream: cfg.stream,
-        source: cfg.source,
-        textFile: cfg.textFile
+        stream: cfg.stream
       };
       applyConfig(preferences);
-      // 记下 Vnite 里实际存的值：设置成剪贴板却还在 OCR 时，靠这条日志定位。
-      const rawNow = JSON.stringify(preferences?.translateSource);
-      if (rawNow !== lastRawSource) {
-        lastRawSource = rawNow;
-        clipLog(`config raw=${rawNow} -> ${cfg.source} enabled=${cfg.enabled} running=${running}`);
-      }
-      if (before.source !== cfg.source || before.textFile !== cfg.textFile) {
-        clipLog(`switch ${before.source} -> ${cfg.source} file=${JSON.stringify(cfg.textFile)}`);
-        // 更换取词方式：整体重启一遍，避免两套取词同时跑
-        if (running) {
-          stop();
-          start();
-        }
-      }
       if (before.lang !== cfg.lang) {
         stopOcr();
         lastSignature = null;
