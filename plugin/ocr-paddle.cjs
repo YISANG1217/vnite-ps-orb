@@ -27,8 +27,8 @@ async function ensureSessions() {
   if (detSession && recSession && dict) return;
   loadOrt();
   const detPath = path.join(MODEL_DIR, 'det.onnx');
-  const recPath = process.env.PSD_REC || path.join(MODEL_DIR, 'rec.onnx');
-  const dictPath = process.env.PSD_DICT || path.join(MODEL_DIR, 'dict.txt');
+  const recPath = path.join(MODEL_DIR, 'rec.onnx');
+  const dictPath = path.join(MODEL_DIR, 'dict.txt');
   for (const file of [detPath, recPath, dictPath]) {
     if (!fs.existsSync(file)) throw new Error(`missing-model:${path.basename(file)}`);
   }
@@ -243,25 +243,6 @@ async function detect(img) {
     }));
   if (process.env.PSD_DEBUG) {
     console.error(`det input=${dstW}x${dstH} map=${pw}x${ph} boxes=${JSON.stringify(boxes)}`);
-  }
-  if (process.env.PSD_DUMP_MAP) {
-    const header = Buffer.alloc(54);
-    header.write('BM', 0);
-    header.writeUInt32LE(54 + pw * ph * 3, 2);
-    header.writeUInt32LE(54, 10);
-    header.writeUInt32LE(40, 14);
-    header.writeInt32LE(pw, 18);
-    header.writeInt32LE(-ph, 22);
-    header.writeUInt16LE(1, 26);
-    header.writeUInt16LE(24, 28);
-    const body = Buffer.alloc(pw * ph * 3);
-    for (let i = 0; i < pw * ph; i += 1) {
-      const v = Math.round(map.data[i] * 255);
-      body[i * 3] = v;
-      body[i * 3 + 1] = v;
-      body[i * 3 + 2] = v;
-    }
-    fs.writeFileSync(process.env.PSD_DUMP_MAP, Buffer.concat([header, body]));
   }
   return boxes;
 }
