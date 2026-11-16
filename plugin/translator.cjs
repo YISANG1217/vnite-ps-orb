@@ -1210,23 +1210,89 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   ipcMain.on(CH.studyDragEnd, () => stopStudyDrag());
   ipcMain.on(CH.studyResize, handleStudyResize);
 
-  // 点单词查释义：优先用词形还原后的原形查，结果按词缓存
+  // 点单词查释义：有道「新日汉」词条带音调、词性、多个义项和双语例句，
+  // 比把单个词丢给翻译引擎只换回一个笼统说法有用得多。
+  // 词典未收录（人名、方言、拟声词）时回落到翻译引擎，至少有个近义说法。
   const lookupCache = new Map();
+
+  function stripTags(text) {
+    return String(text || '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  async function youdaoEntry(query) {
+    const url = `https://dict.youdao.com/jsonapi?q=${encodeURIComponent(query)}&le=jap`;
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://dict.youdao.com/' }
+    });
+    if (!response.ok) throw new Error(`youdao-${response.status}`);
+    const data = await response.json();
+    const entry = data?.newjc;
+    if (!entry || !entry.word) return null;
+    const head = entry.word.head || {};
+    const homonym = Array.isArray(entry.word.homonymD) ? entry.word.homonymD[0] : null;
+    const senses = [];
+    const pushSenses = list => {
+      if (!Array.isArray(list)) return;
+      list.forEach(sense => {
+        const items = (sense?.phrList || []).map(item => stripTags(item?.jmsy)).filter(Boolean);
+        if (items.length) senses.push({ pos: stripTags(sense?.cx || ''), text: items.join('；') });
+      });
+    };
+    pushSenses(homonym?.sense);
+    pushSenses(entry.word.sense);
+    const examples = (data?.blng_sents_part?.['sentence-pair'] || [])
+      .map(pair => ({
+        ja: stripTags(pair?.sentence),
+        zh: stripTags(pair?.['sentence-translation'])
+      }))
+      // 有道的例句偶尔会串到别的词（只按读音模糊匹配），单词核一下开头两三个字
+      .filter(pair => {
+        if (!pair.ja || !pair.zh || pair.zh === pair.ja) return false;
+        const stem = query.slice(0, Math.min(3, query.length));
+        return pair.ja.includes(stem);
+      })
+      .slice(0, 2);
+    return {
+      word: stripTags(head.hw || ''),
+      // 词条可能以假名为主词条，汉字写法单独带出来
+      kanji: stripTags(homonym?.head?.hw || ''),
+      reading: stripTags(head.pjm || ''),
+      tone: stripTags(homonym?.head?.tone || head.tone || ''),
+      // 主词条的罗马字比 head 的「いじわる → iji/jiwaru」干净
+      romaji: stripTags(homonym?.head?.rs || head.rs || '').replace(/\//g, '、'),
+      exam: Array.isArray(entry.exam_type) ? entry.exam_type.join(' / ') : '',
+      senses,
+      examples
+    };
+  }
 
   async function lookupWord(payload) {
     const surface = String(payload?.surface || '').trim().slice(0, 40);
-    if (!surface) return { meaning: '' };
+    if (!surface) return { meaning: '', detail: null };
     const base = String(payload?.base || '').trim().slice(0, 40);
     const query = base || surface;
-    let meaning = lookupCache.get(query);
-    if (meaning === undefined) {
-      meaning = await translateText(query).catch(() => '');
-      if (meaning) {
-        lookupCache.set(query, meaning);
+    let entry = lookupCache.get(query);
+    if (!entry) {
+      entry = await youdaoEntry(query).catch(() => null);
+      if (!entry || !entry.senses.length) {
+        const meaning = await translateText(query).catch(() => '');
+        entry = meaning ? { senses: [{ pos: '', text: meaning }], examples: [] } : null;
+      }
+      if (entry) {
+        lookupCache.set(query, entry);
         if (lookupCache.size > 200) lookupCache.delete(lookupCache.keys().next().value);
       }
     }
-    return { meaning };
+    if (!entry) return { meaning: '', detail: null };
+    const first = entry.senses?.[0]?.text || '';
+    return {
+      // 列表里只放第一义项的开头，完整的留到详情卡
+      meaning: first.length > 36 ? `${first.slice(0, 36)}…` : first,
+      detail: entry
+    };
   }
 
   ipcMain.handle(CH.studyLookup, (event, payload) => {

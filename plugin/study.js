@@ -238,6 +238,28 @@
     detailKey = '';
   }
 
+  // 词典词条 → 详情卡正文：义项逐条编号，后面附日汉对照例句
+  function formatEntry(detail, surface) {
+    if (!detail) return '';
+    const lines = [];
+    const kanji = detail.kanji && detail.kanji !== surface ? `汉字写法 ${detail.kanji}` : '';
+    if (kanji) lines.push(kanji);
+    (detail.senses || []).forEach((sense, index) => {
+      const pos = sense.pos ? `[${sense.pos}] ` : '';
+      lines.push(`${index + 1}. ${pos}${sense.text}`);
+    });
+    const examples = detail.examples || [];
+    if (examples.length) {
+      lines.push('');
+      lines.push('例文');
+      examples.forEach(example => {
+        lines.push(example.ja);
+        lines.push(example.zh);
+      });
+    }
+    return lines.join('\n');
+  }
+
   wordsEl.addEventListener('click', async event => {
     const item = event.target.closest('.word');
     if (!item) return;
@@ -269,8 +291,23 @@
       })
       .catch(() => null);
     if (detailKey !== key) return;
+    const detail = result?.detail;
+    // 词典查到了就补上音调、罗马字、JLPT 等级，比 kuromoji 给的更全
+    const head = [];
+    if (detail?.reading) head.push(detail.reading + (detail.tone ? ` ${detail.tone}` : ''));
+    if (detail?.romaji) head.push(detail.romaji);
+    if (data.base && data.base !== data.surface) head.push(`原形 ${data.base}`);
+    if (head.length) {
+      detailReadingEl.textContent = head.join(' · ');
+      detailReadingEl.hidden = false;
+    }
+    const pos = [data.label, detail?.exam].filter(Boolean).join(' · ');
+    if (pos) {
+      detailPosEl.textContent = pos;
+      detailPosEl.hidden = false;
+    }
     detailMeaningEl.classList.remove('is-loading');
-    detailMeaningEl.textContent = result?.meaning || '未查到释义';
+    detailMeaningEl.textContent = formatEntry(detail, data.surface) || result?.meaning || '未查到释义';
     if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
   });
 

@@ -271,6 +271,9 @@ html.is-dragging * {
   font-size: 12px;
   line-height: 1.55;
   color: rgba(230, 240, 255, 0.86);
+  white-space: pre-line;
+  max-height: 210px;
+  overflow-y: auto;
 }
 
 .detail-meaning.is-loading {
