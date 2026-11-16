@@ -37,6 +37,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     interval: 1000,
     study: false,
     stream: false,
+    ocrEngine: 'paddle',
     region: null
   };
 
@@ -79,6 +80,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
     cfg.stream = preferences?.translateStream === true;
+    cfg.ocrEngine = preferences?.translateOcrEngine === 'windows' ? 'windows' : 'paddle';
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
   }
@@ -173,6 +175,98 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         clearTimeout(waiter.timer);
         const index = ocrWaiters.indexOf(waiter);
         if (index !== -1) ocrWaiters.splice(index, 1);
+        reject(error);
+      }
+    });
+  }
+
+  // ————— PaddleOCR 子进程 —————
+  // Windows 自带 OCR 对游戏里的描边字、半透明对话框很不稳；PaddleOCR 走的是
+  // 专门的文字检测 + 日文识别模型，同样的台词基本能整句认对。
+  // 模型加载要几百毫秒，所以只拉起一次常驻进程，逐张图复用。
+  let paddleProc = null;
+  let paddleBuffer = '';
+  let paddleWaiters = [];
+  // 子进程起不来（缺模型、杀毒软件拦截）就置位，本局内不再重试，避免每帧都卡一下
+  let paddleBroken = false;
+
+  function stopPaddle() {
+    paddleBuffer = '';
+    paddleWaiters.splice(0).forEach(waiter => {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error('paddle-stopped'));
+    });
+    if (paddleProc) {
+      try {
+        paddleProc.stdin.end();
+        paddleProc.kill();
+      } catch {
+        /* 忽略 */
+      }
+      paddleProc = null;
+    }
+  }
+
+  function startPaddle() {
+    if (paddleProc || paddleBroken) return;
+    const script = path.join(__dirname, 'ocr-paddle.cjs');
+    paddleProc = spawn(process.execPath, [script], {
+      windowsHide: true,
+      // Vnite 主进程本身是 Electron，加上这个环境变量才会以纯 Node 方式跑脚本
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    });
+    paddleProc.stdout.setEncoding('utf8');
+    paddleProc.stdout.on('data', chunk => {
+      paddleBuffer += chunk;
+      let index;
+      while ((index = paddleBuffer.indexOf('\n')) !== -1) {
+        const line = paddleBuffer.slice(0, index).trim();
+        paddleBuffer = paddleBuffer.slice(index + 1);
+        if (!line) continue;
+        let payload;
+        try {
+          payload = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (payload.ready) continue;
+        const waiter = paddleWaiters.shift();
+        if (!waiter) continue;
+        clearTimeout(waiter.timer);
+        if (payload.error) waiter.reject(new Error(payload.error));
+        else waiter.resolve(payload);
+      }
+    });
+    paddleProc.stderr.on('data', () => {});
+    paddleProc.on('exit', () => {
+      paddleProc = null;
+      paddleWaiters.splice(0).forEach(waiter => {
+        clearTimeout(waiter.timer);
+        waiter.reject(new Error('paddle-exit'));
+      });
+    });
+  }
+
+  function paddleSend(imagePath, timeout = 8000) {
+    return new Promise((resolve, reject) => {
+      if (!paddleProc) startPaddle();
+      if (!paddleProc) {
+        reject(new Error('paddle-unavailable'));
+        return;
+      }
+      const waiter = { resolve, reject, timer: null };
+      waiter.timer = setTimeout(() => {
+        const index = paddleWaiters.indexOf(waiter);
+        if (index !== -1) paddleWaiters.splice(index, 1);
+        reject(new Error('paddle-timeout'));
+      }, timeout);
+      paddleWaiters.push(waiter);
+      try {
+        paddleProc.stdin.write(`${JSON.stringify({ image: imagePath })}\n`);
+      } catch (error) {
+        clearTimeout(waiter.timer);
+        const index = paddleWaiters.indexOf(waiter);
+        if (index !== -1) paddleWaiters.splice(index, 1);
         reject(error);
       }
     });
@@ -819,7 +913,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return rects.length ? ` ${rects.join(' ')}` : '';
   }
 
-  async function captureInHelper() {
+  // captureOnly：只把画面存成 BMP 交给 PaddleOCR，不在 PowerShell 里识别
+  async function captureInHelper(captureOnly) {
     const display = screen.getDisplayMatching(cfg.region);
     const scale = display.scaleFactor || 1;
     const x = Math.round(cfg.region.x * scale);
@@ -827,7 +922,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const width = Math.max(8, Math.round(cfg.region.width * scale));
     const height = Math.max(8, Math.round(cfg.region.height * scale));
     const masks = maskRects(scale);
-    return ocrSend(`cap ${x} ${y} ${width} ${height}${masks}`, 5000);
+    const command = captureOnly ? 'capimg' : 'cap';
+    return ocrSend(`${command} ${x} ${y} ${width} ${height}${masks}`, 5000);
   }
 
   // 两套预处理的结果里挑更像日文的那份：OCR 出错最典型的表现是假名被认成
@@ -893,14 +989,28 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   async function processFrame() {
     if (captureMode === 'gdi' && canCaptureInHelper()) {
-      const result = await captureInHelper();
+      const usePaddle = cfg.ocrEngine === 'paddle' && !paddleBroken;
+      const result = await captureInHelper(usePaddle);
       if (result.skip || result.wait) {
         // wait：字幕还在逐字显示或画面在动，识别进程让我们等稳定帧
         idleTicks += 1;
         return;
       }
       idleTicks = 0;
-      const text = await textFromResult(result);
+      let payload = result;
+      if (usePaddle) {
+        try {
+          payload = await paddleSend(result.img);
+        } catch (error) {
+          // 只有 paddle 这一路挂了才回落，下一次识别照常走 Windows OCR
+          paddleBroken = true;
+          stopPaddle();
+          debugLog(`paddle 不可用，回落 Windows OCR: ${error?.message || error}`);
+          console.warn('[PS 悬浮球] PaddleOCR 不可用，改用 Windows OCR', error?.message || error);
+          return;
+        }
+      }
+      const text = await textFromResult(payload);
       if (text) await acceptText(text);
       return;
     }
@@ -993,6 +1103,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     if (cfg.region) {
       startOcr();
+      paddleBroken = false;
+      if (cfg.ocrEngine === 'paddle') startPaddle();
       captureMode = cfg.stream ? 'stream' : 'gdi';
       lastFrameAt = 0;
       if (cfg.stream) {
@@ -1014,6 +1126,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     pumpTimer = null;
     pendingFrame = null;
     stopOcr();
+    stopPaddle();
     stopCaptureStream();
     if (subtitleWin && !subtitleWin.isDestroyed()) subtitleWin.hide();
     if (studyWin && !studyWin.isDestroyed()) studyWin.hide();
@@ -1150,13 +1263,20 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         original: cfg.original,
         interval: cfg.interval,
         study: cfg.study,
-        stream: cfg.stream
+        stream: cfg.stream,
+        ocrEngine: cfg.ocrEngine
       };
       applyConfig(preferences);
       if (before.lang !== cfg.lang) {
         stopOcr();
         lastSignature = null;
         lastText = '';
+      }
+      if (before.ocrEngine !== cfg.ocrEngine) {
+        paddleBroken = false;
+        stopPaddle();
+        lastSignature = null;
+        if (running && cfg.ocrEngine === 'paddle') startPaddle();
       }
       if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
       if (before.interval !== cfg.interval) schedule(cfg.interval);
@@ -1209,6 +1329,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       pumpTimer = null;
       stopStudyDrag();
       stopOcr();
+      stopPaddle();
       ipcMain.removeAllListeners(CH.regionCommit);
       ipcMain.removeAllListeners(CH.regionCancel);
       ipcMain.removeAllListeners(CH.resize);

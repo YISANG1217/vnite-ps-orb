@@ -2,7 +2,7 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。内置实时翻译字幕：框选游戏文字区域，OCR 识别并翻译成中文显示在屏幕底部。",
-  "version": "1.14.2",
+  "version": "1.15.0",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
@@ -89,10 +89,30 @@
       "id": "translateEnabled",
       "type": "boolean",
       "title": "实时翻译字幕",
-      "description": "截取框选的文字区域，用 Windows 自带 OCR 识别后翻译，结果显示在屏幕底部的字幕条上。",
+      "description": "截取框选的文字区域，OCR 识别后翻译成中文，结果显示在屏幕底部的字幕条上。",
       "default": false,
       "controlOptions": {
         "controlType": "switch"
+      }
+    },
+    {
+      "id": "translateOcrEngine",
+      "type": "select",
+      "title": "OCR 引擎",
+      "description": "PaddleOCR 对游戏里的描边字、半透明对话框识别更准（推荐）；Windows OCR 体积小、启动快，但长句容易串字。PaddleOCR 不可用时会自动回落到 Windows OCR。",
+      "default": "paddle",
+      "options": [
+        {
+          "label": "PaddleOCR（推荐，更准）",
+          "value": "paddle"
+        },
+        {
+          "label": "Windows 自带 OCR（轻量）",
+          "value": "windows"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
       }
     },
     {

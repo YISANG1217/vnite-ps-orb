@@ -1,0 +1,10 @@
+{
+  "name": "local-vnite-ps-orb",
+  "version": "1.15.0",
+  "private": true,
+  "description": "Vnite 插件运行时依赖（用户无需手动安装）",
+  "dependencies": {
+    "kuromoji": "^0.1.2",
+    "onnxruntime-node": "1.31.1"
+  }
+}

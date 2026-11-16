@@ -388,7 +388,24 @@ while ($true) {
   $line = $line.Trim()
   if ($line -eq '') { continue }
   try {
-    if ($line.StartsWith('cap ')) {
+    if ($line.StartsWith('capimg ')) {
+      # 只抓图不识别：画面稳定时存成 BMP，交给主进程的 PaddleOCR 子进程。
+      # 画面指纹和等稳定帧的逻辑仍然留在这里，避免对没变化的帧跑一遍模型。
+      $cap = ConvertTo-CaptureArgs (($line.Substring(7).Trim()) -split '\s+')
+      if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
+      $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
+      try {
+        $state = Test-FrameChange $bmp
+        if ($state -eq 'black') { Write-Line '{"error":"capture-black"}'; continue }
+        if ($state -eq 'skip') { Write-Line '{"skip":true}'; continue }
+        if ($state -eq 'wait') { Write-Line '{"wait":true}'; continue }
+        $imgPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'local-vnite-ps-orb-frame.bmp')
+        $bmp.Save($imgPath, [System.Drawing.Imaging.ImageFormat]::Bmp)
+        Write-Line (@{ img = $imgPath } | ConvertTo-Json -Compress)
+      } finally {
+        $bmp.Dispose()
+      }
+    } elseif ($line.StartsWith('cap ')) {
       $cap = ConvertTo-CaptureArgs (($line.Substring(4).Trim()) -split '\s+')
       if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
       $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
