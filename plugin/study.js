@@ -182,8 +182,8 @@
 
   cardEl?.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
-    // 点单词 / 点详情卡不要触发拖动，否则会把点击吃掉
-    if (event.target.closest('.word, .word-detail')) return;
+    // 点单词 / 点详情卡 / 点抽屉和按钮不要触发拖动，否则会把点击吃掉
+    if (event.target.closest('.word, .word-detail, .drawer, .tool')) return;
     if (inside(gripEl, event.clientX, event.clientY)) {
       resizing = {
         x: event.screenX,
@@ -272,6 +272,16 @@
     }
     detailKey = key;
     detailEl.hidden = false;
+    // 点开就算想学：顺手收进生词本，重复收录由主进程按原形去重
+    item.classList.add('is-saved');
+    api
+      .wordbookAdd({
+        surface: data.surface,
+        base: data.base,
+        reading: data.reading,
+        pos: data.label
+      })
+      .catch(() => {});
     // 只在当前词上留高亮，方便和浮动详情卡对上
     wordsEl.querySelectorAll('.word.is-active').forEach(node => node.classList.remove('is-active'));
     item.classList.add('is-active');
@@ -316,6 +326,95 @@
   });
 
   document.getElementById('detailClose')?.addEventListener('click', closeDetail);
+
+  // ————— 生词本 / 字幕历史抽屉 —————
+  const drawerEl = document.getElementById('drawer');
+  const drawerTitleEl = document.getElementById('drawerTitle');
+  const drawerHintEl = document.getElementById('drawerHint');
+  const drawerListEl = document.getElementById('drawerList');
+  const drawerExportEl = document.getElementById('drawerExport');
+  let drawerMode = '';
+
+  function span(className, text) {
+    const node = document.createElement('span');
+    node.className = className;
+    node.textContent = text;
+    return node;
+  }
+
+  function closeDrawer() {
+    drawerMode = '';
+    drawerEl.hidden = true;
+  }
+
+  function drawerRow(className = 'drawer-item') {
+    const item = document.createElement('li');
+    item.className = className;
+    return item;
+  }
+
+  function renderWordbook(items) {
+    items.forEach(entry => {
+      const item = drawerRow();
+      const head = document.createElement('div');
+      head.className = 'drawer-item-head';
+      head.appendChild(span('surface', entry.word || ''));
+      if (entry.reading && entry.reading !== entry.word) {
+        head.appendChild(span('reading', entry.reading));
+      }
+      if (entry.pos) head.appendChild(span('pos', entry.pos));
+      item.appendChild(head);
+      if (entry.meaning) item.appendChild(span('meaning', entry.meaning));
+      drawerListEl.appendChild(item);
+    });
+  }
+
+  function renderHistory(items) {
+    items.forEach(line => {
+      const item = drawerRow('drawer-item history-item');
+      if (line.speaker) item.appendChild(span('speaker', line.speaker));
+      item.appendChild(span('ja', line.ja || ''));
+      item.appendChild(span('zh', line.zh || '（无译文）'));
+      drawerListEl.appendChild(item);
+    });
+  }
+
+  async function openDrawer(mode) {
+    if (drawerMode === mode && !drawerEl.hidden) {
+      closeDrawer();
+      return;
+    }
+    drawerMode = mode;
+    drawerEl.hidden = false;
+    drawerTitleEl.textContent = mode === 'wordbook' ? '生词本' : '最近字幕';
+    drawerExportEl.hidden = mode !== 'wordbook';
+    drawerListEl.textContent = '';
+    const items = await (mode === 'wordbook' ? api.wordbookList() : api.history()).catch(() => []);
+    if (drawerMode !== mode) return;
+    if (mode === 'wordbook') {
+      drawerHintEl.textContent = items.length ? `共 ${items.length} 个词 · 点单词自动收录` : '';
+      if (!items.length) {
+        drawerListEl.appendChild(empty('还没有收录单词，点面板里的单词就会自动记下来'));
+        return;
+      }
+      renderWordbook(items);
+    } else {
+      drawerHintEl.textContent = items.length ? `最近 ${items.length} 句` : '';
+      if (!items.length) {
+        drawerListEl.appendChild(empty('还没有字幕记录'));
+        return;
+      }
+      renderHistory(items);
+    }
+  }
+
+  document.getElementById('wordbookBtn')?.addEventListener('click', () => openDrawer('wordbook'));
+  document.getElementById('historyBtn')?.addEventListener('click', () => openDrawer('history'));
+  document.getElementById('drawerClose')?.addEventListener('click', closeDrawer);
+  drawerExportEl?.addEventListener('click', async () => {
+    const result = await api.wordbookExport().catch(() => null);
+    drawerHintEl.textContent = result?.file ? `已导出到 ${result.file}` : '导出失败';
+  });
 
   api.onStudy(render);
 })();

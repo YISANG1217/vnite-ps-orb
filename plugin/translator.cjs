@@ -45,6 +45,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     study: false,
     stream: false,
     ocrEngine: 'paddle',
+    subtitlePos: 'bottom',
+    subtitleOffset: 0,
     region: null
   };
 
@@ -87,6 +89,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.original = preferences?.translateOriginal !== false;
     cfg.study = preferences?.translateStudy === true;
     cfg.stream = preferences?.translateStream === true;
+    cfg.subtitlePos = preferences?.translateSubtitlePos === 'top' ? 'top' : 'bottom';
+    const offset = Number.parseInt(preferences?.translateSubtitleOffset, 10);
+    cfg.subtitleOffset = Number.isFinite(offset) ? clamp(offset, 0, 300) : 0;
     cfg.ocrEngine = preferences?.translateOcrEngine === 'windows' ? 'windows' : 'paddle';
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
@@ -510,9 +515,14 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const area = display.workArea;
     const width = Math.round(area.width * 0.74);
     const height = clamp(subtitleBounds?.height || subtitleWin.getBounds().height || 168, 40, 320);
+    const margin = Math.max(18, Math.round(area.height * 0.055));
     const next = {
       x: area.x + Math.round((area.width - width) / 2),
-      y: area.y + area.height - height - Math.round(area.height * 0.055),
+      // 贴底时底边固定、高度向上长；贴顶时上边固定、向下长
+      y:
+        cfg.subtitlePos === 'top'
+          ? area.y + margin + cfg.subtitleOffset
+          : area.y + area.height - height - margin - cfg.subtitleOffset,
       width,
       height
     };
@@ -928,6 +938,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     if (cached !== undefined) {
       lastTranslated = cached;
+      rememberLine(text, cached);
       return;
     }
     const translated = await translateText(text).catch(error => {
@@ -940,6 +951,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       if (cache.size > 200) cache.delete(cache.keys().next().value);
     }
     lastTranslated = translated || '';
+    rememberLine(text, translated || '');
     showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
   }
 
@@ -1429,6 +1441,87 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return lookupWord(payload);
   });
 
+  // ————— 生词本 / 字幕历史 —————
+  const wordbook = Array.isArray(readState().wordbook) ? readState().wordbook.slice(0, 600) : [];
+  const history = [];
+  const HISTORY_LIMIT = 20;
+
+  function wordbookList() {
+    return wordbook.slice();
+  }
+
+  async function addToWordbook(payload) {
+    const surface = String(payload?.surface || '').trim().slice(0, 40);
+    if (!surface) return wordbookList();
+    const key = String(payload?.base || surface).trim() || surface;
+    // 同一个词（按原形判）只留一条，重复点击不叠加
+    if (wordbook.some(item => item.key === key)) return wordbookList();
+    const entry = await lookupWord(payload);
+    wordbook.unshift({
+      key,
+      word: surface,
+      reading: String(payload?.reading || '').trim(),
+      pos: String(payload?.pos || '').trim(),
+      meaning: String(entry?.meaning || '').trim(),
+      at: Date.now()
+    });
+    if (wordbook.length > 600) wordbook.length = 600;
+    writeState({ wordbook });
+    return wordbookList();
+  }
+
+  function exportWordbook() {
+    const escape = value => `"${String(value || '').replace(/"/g, '""')}"`;
+    const rows = [['单词', '读音', '词性', '释义']];
+    wordbook.forEach(item => rows.push([item.word, item.reading, item.pos, item.meaning]));
+    const csv = rows.map(row => row.map(escape).join(',')).join('\r\n');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const file = path.join(app.getPath('documents'), `ps-orb-生词本-${stamp}.csv`);
+    // 带 BOM，Excel 双击打开不会把日文变成乱码
+    writeFileSync(file, `\uFEFF${csv}`, 'utf8');
+    return file;
+  }
+
+  function rememberLine(ja, zh) {
+    if (!ja) return;
+    const speaker = speakerNames(ja)[0] || '';
+    if (history[0]?.ja === ja) {
+      history[0].zh = zh || history[0].zh;
+      return;
+    }
+    history.unshift({ ja, zh: zh || '', speaker, at: Date.now() });
+    if (history.length > HISTORY_LIMIT) history.pop();
+  }
+
+  // 只有伴学窗口能读写，和 studyLookup 同一套校验
+  function fromStudy(event) {
+    return studyWin && !studyWin.isDestroyed() && event.sender === studyWin.webContents;
+  }
+
+  ipcMain.handle(CH.studyWordbookAdd, (event, payload) => {
+    if (!fromStudy(event)) return [];
+    return addToWordbook(payload);
+  });
+
+  ipcMain.handle(CH.studyWordbookList, event => {
+    if (!fromStudy(event)) return [];
+    return wordbookList();
+  });
+
+  ipcMain.handle(CH.studyWordbookExport, event => {
+    if (!fromStudy(event)) return { error: 'forbidden' };
+    try {
+      return { file: exportWordbook() };
+    } catch (error) {
+      return { error: String(error?.message || error) };
+    }
+  });
+
+  ipcMain.handle(CH.studyHistory, event => {
+    if (!fromStudy(event)) return [];
+    return history;
+  });
+
   ipcMain.on(CH.captureFailed, (event, reason) => {
     if (!captureWin || event.sender !== captureWin.webContents) return;
     console.warn('[PS 悬浮球] 画面流不可用，改用直接截屏', reason);
@@ -1440,11 +1533,13 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   ipcMain.on(CH.resize, (event, height) => {
     if (!subtitleWin || subtitleWin.isDestroyed() || event.sender !== subtitleWin.webContents) return;
-    const next = clamp(Math.round(Number(height) || 0), 96, 320);
+    const next = clamp(Math.round(Number(height) || 0), 44, 320);
     const bounds = subtitleWin.getBounds();
     if (Math.abs(bounds.height - next) < 2) return;
     subtitleBounds = null;
-    subtitleWin.setBounds({ ...bounds, y: bounds.y + bounds.height - next, height: next }, false);
+    // 贴底时保持底边不动、向上长；贴顶时保持上边不动、向下长
+    const y = cfg.subtitlePos === 'top' ? bounds.y : bounds.y + bounds.height - next;
+    subtitleWin.setBounds({ ...bounds, y, height: next }, false);
   });
 
   return {
@@ -1457,9 +1552,15 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         interval: cfg.interval,
         study: cfg.study,
         stream: cfg.stream,
-        ocrEngine: cfg.ocrEngine
+        ocrEngine: cfg.ocrEngine,
+        subtitlePos: cfg.subtitlePos,
+        subtitleOffset: cfg.subtitleOffset
       };
       applyConfig(preferences);
+      if (before.subtitlePos !== cfg.subtitlePos || before.subtitleOffset !== cfg.subtitleOffset) {
+        subtitleBounds = null;
+        placeSubtitle();
+      }
       if (before.lang !== cfg.lang) {
         stopOcr();
         lastSignature = null;
@@ -1532,6 +1633,10 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeAllListeners(CH.studyDragEnd);
       ipcMain.removeAllListeners(CH.studyResize);
       ipcMain.removeHandler(CH.studyLookup);
+      ipcMain.removeHandler(CH.studyWordbookAdd);
+      ipcMain.removeHandler(CH.studyWordbookList);
+      ipcMain.removeHandler(CH.studyWordbookExport);
+      ipcMain.removeHandler(CH.studyHistory);
       [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });

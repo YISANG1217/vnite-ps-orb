@@ -2,7 +2,7 @@
   "id": "local-vnite-ps-orb",
   "name": "PlayStation 悬浮球",
   "description": "一枚桌面级 PlayStation 风格悬浮球：始终置顶、可拖动记忆位置，点击展开最近游玩，继续游戏或把 Vnite 唤到前台。内置实时翻译字幕：框选游戏文字区域，OCR 识别并翻译成中文显示在屏幕底部。",
-  "version": "1.16.2",
+  "version": "1.17.0",
   "main": "index.cjs",
   "icon": "icon.png",
   "vniteVersion": "4.14.0",
@@ -193,6 +193,54 @@
         "controlType": "input",
         "inputType": "text",
         "placeholder": "qwen2.5:7b"
+      }
+    },
+    {
+      "id": "translateSubtitlePos",
+      "type": "select",
+      "title": "字幕位置",
+      "description": "字幕条贴在屏幕底部还是顶部。对话框在画面中上时选顶部。",
+      "default": "bottom",
+      "options": [
+        {
+          "label": "底部",
+          "value": "bottom"
+        },
+        {
+          "label": "顶部",
+          "value": "top"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
+      }
+    },
+    {
+      "id": "translateSubtitleOffset",
+      "type": "select",
+      "title": "字幕间距",
+      "description": "字幕条与屏幕边缘的额外距离，字幕挡住对话框时往上/往下挪。",
+      "default": "0",
+      "options": [
+        {
+          "label": "贴边",
+          "value": "0"
+        },
+        {
+          "label": "40px",
+          "value": "40"
+        },
+        {
+          "label": "80px",
+          "value": "80"
+        },
+        {
+          "label": "120px",
+          "value": "120"
+        }
+      ],
+      "controlOptions": {
+        "controlType": "select"
       }
     },
     {

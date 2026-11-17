@@ -714,6 +714,21 @@ async function activate(api) {
 
   applyHotkey(initialPreferences?.hotkey !== false);
 
+  // 翻译快捷键：O 开关实时翻译，R 重新框选区域，不用退回悬浮球菜单
+  const TRANSLATE_HOTKEYS = [
+    ['Control+Alt+O', () => translator.toggle()],
+    ['Control+Alt+R', () => translator.openOverlay()]
+  ];
+  TRANSLATE_HOTKEYS.forEach(([accelerator, handler]) => {
+    try {
+      if (!globalShortcut.register(accelerator, handler)) {
+        console.warn(`[PS 悬浮球] ${accelerator} 已被其他程序占用`);
+      }
+    } catch (error) {
+      console.warn('[PS 悬浮球] 注册翻译快捷键失败', error);
+    }
+  });
+
   const onDisplayChange = () => {
     if (!win || win.isDestroyed()) return;
     placeWindow({ persist: true });
@@ -767,6 +782,7 @@ async function activate(api) {
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);
     globalShortcut.unregister('Control+Alt+P');
+    TRANSLATE_HOTKEYS.forEach(([accelerator]) => globalShortcut.unregister(accelerator));
     INVOKE_CHANNELS.forEach(key => ipcMain.removeHandler(CHANNELS[key]));
     LISTEN_CHANNELS.forEach(key => ipcMain.removeAllListeners(CHANNELS[key]));
     if (win && !win.isDestroyed()) {

@@ -368,3 +368,171 @@ html.is-dragging * {
   font-size: 11px;
   color: var(--faint);
 }
+
+/* ————— 顶部工具按钮 ————— */
+.head-tools {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.tool {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.tool:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--ink);
+}
+
+/* 已收录进生词本的词，右上角点一个小圆点 */
+.word {
+  position: relative;
+}
+
+.word.is-saved::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 85%, transparent);
+}
+
+/* ————— 生词本 / 历史抽屉 ————— */
+.drawer {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 40px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(13, 18, 28, 0.985);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: drawer-in 0.16s ease both;
+}
+
+.drawer[hidden] {
+  display: none;
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.drawer-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+.drawer-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 9.5px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 10px 10px;
+}
+
+.drawer-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.drawer-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.drawer-item .surface {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.drawer-item .reading {
+  font-size: 9.5px;
+  color: color-mix(in srgb, var(--accent) 62%, #ffffff);
+}
+
+.drawer-item .pos {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 8.5px;
+  color: var(--faint);
+}
+
+.drawer-item .meaning {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.history-item .speaker {
+  align-self: flex-start;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  font-size: 9px;
+  color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+}
+
+.history-item .ja {
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(230, 240, 255, 0.7);
+}
+
+.history-item .zh {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}

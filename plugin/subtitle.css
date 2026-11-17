@@ -60,9 +60,18 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* 说话人标签：冷色调，和灰色原文区分开 */
+/* 说话人徽章：同一个人永远同一个色相，冷色小药丸和原文区分开 */
 .original .speaker {
-  color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+  --hue: 210;
+  display: inline-block;
+  margin-right: 7px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: hsl(var(--hue) 62% 52% / 0.22);
+  box-shadow: inset 0 0 0 1px hsl(var(--hue) 72% 62% / 0.32);
+  color: hsl(var(--hue) 78% 78%);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .translated {

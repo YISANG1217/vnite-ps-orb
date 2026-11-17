@@ -13,6 +13,10 @@ module.exports = {
     studyDragEnd: `${id}:tr-study-drag-end`,
     studyResize: `${id}:tr-study-resize`,
     studyLookup: `${id}:tr-study-lookup`,
+    studyWordbookAdd: `${id}:tr-study-wordbook-add`,
+    studyWordbookList: `${id}:tr-study-wordbook-list`,
+    studyWordbookExport: `${id}:tr-study-wordbook-export`,
+    studyHistory: `${id}:tr-study-history`,
     captureStart: `${id}:tr-capture-start`,
     captureFrame: `${id}:tr-capture-frame`,
     captureFailed: `${id}:tr-capture-failed`

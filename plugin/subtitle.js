@@ -26,6 +26,13 @@
     translatedEl.style.fontSize = `${Math.round(baseFont * scale)}px`;
   }
 
+  // 同一个角色固定同一个色相，多角色对话一眼分出谁在说话
+  function speakerHue(name) {
+    let hash = 0;
+    for (const ch of name) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+    return hash;
+  }
+
   // 说话人标签【武】单独着色，和台词正文区分开
   function renderOriginal(text) {
     originalEl.textContent = '';
@@ -41,7 +48,8 @@
     }
     const speaker = document.createElement('span');
     speaker.className = 'speaker';
-    speaker.textContent = `【${match[1]}】`;
+    speaker.textContent = match[1];
+    speaker.style.setProperty('--hue', String(speakerHue(match[1])));
     originalEl.append(speaker, document.createTextNode(match[2]));
   }
 
