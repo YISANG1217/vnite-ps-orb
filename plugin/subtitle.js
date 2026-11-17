@@ -36,14 +36,16 @@
   // 说话人标签【武】单独着色，和台词正文区分开
   function renderOriginal(text) {
     originalEl.textContent = '';
-    if (!text) {
+    const raw = String(text || '');
+    if (!raw.trim()) {
       originalEl.hidden = true;
       return;
     }
     originalEl.hidden = false;
-    const match = /^【([^】]{1,10})】([\s\S]*)$/.exec(text);
+    // 允许前面混进空格/全角空格：OCR 有时会把缩进一起带出来
+    const match = /^[\s\u3000]*【([^】]{1,10})】([\s\S]*)$/.exec(raw);
     if (!match) {
-      originalEl.textContent = text;
+      originalEl.textContent = raw;
       return;
     }
     const speaker = document.createElement('span');

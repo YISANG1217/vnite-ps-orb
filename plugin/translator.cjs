@@ -9,6 +9,15 @@ const { createAnalyzer } = require('./analyzer.cjs');
 
 const ENGINES = new Set(['tencent', 'google', 'openai']);
 
+// 启动时把版本打进日志：排查「装了新版但界面没变」时一眼能看出跑的是哪一版
+const VERSION = (() => {
+  try {
+    return require('./manifest.json').version || '?';
+  } catch {
+    return '?';
+  }
+})();
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1287,6 +1296,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   function start() {
     if (running) return;
     running = true;
+    debugLog(`翻译启动 v${VERSION}（ocr=${cfg.ocrEngine}，位置=${cfg.subtitlePos}）`);
     lastSignature = null;
     lastText = '';
     lastTranslated = '';
