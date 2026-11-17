@@ -194,6 +194,18 @@ function createAnalyzer(kuromojiDir) {
     );
   }
 
+  // OCR 自检：正常台词基本都能被词典切出来，乱码时会出现大段未登录词。
+  // 只统计实词/假名，符号和数字不算，避免「……」「！」把比例冲淡。
+  async function check(text) {
+    if (!text) return { oov: 1, unknown: 0, total: 0, bad: true };
+    const instance = await load();
+    const tokens = instance.tokenize(text).filter(token => token.pos !== '記号');
+    if (!tokens.length) return { oov: 1, unknown: 0, total: 0, bad: true };
+    const unknown = tokens.filter(token => token.word_type === 'UNKNOWN').length;
+    const oov = unknown / tokens.length;
+    return { oov, unknown, total: tokens.length, bad: tokens.length >= 4 && oov > 0.45 };
+  }
+
   return {
     async analyze(text) {
       if (!text) return null;
@@ -206,6 +218,7 @@ function createAnalyzer(kuromojiDir) {
       };
     },
     correct,
+    check,
     warmup() {
       load().catch(() => {});
     }

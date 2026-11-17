@@ -2,7 +2,7 @@
 // 以模块形式挂在悬浮球插件内，不单独占一个插件。
 const { app, BrowserWindow, ipcMain, screen, desktopCapturer } = require('electron');
 const { spawn } = require('node:child_process');
-const { writeFileSync, appendFileSync } = require('node:fs');
+const { writeFileSync, appendFileSync, statSync, renameSync } = require('node:fs');
 const path = require('node:path');
 const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
@@ -17,9 +17,16 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   const tempImage = path.join(app.getPath('temp'), 'local-vnite-ps-orb-ocr.png');
 
   // 诊断日志：OCR 出错时把两份识别结果写进 translate.log，方便对照调参。
+  // 超过 512KB 就换一份，长期挂机不会把磁盘写满。
   function debugLog(line) {
     try {
-      appendFileSync(path.join(path.dirname(stateFile), 'translate.log'), `${new Date().toISOString()} ${line}\n`);
+      const file = path.join(path.dirname(stateFile), 'translate.log');
+      try {
+        if (statSync(file).size > 512 * 1024) renameSync(file, `${file}.1`);
+      } catch {
+        /* 文件还不存在 */
+      }
+      appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
     } catch {
       /* 忽略 */
     }
@@ -187,8 +194,10 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   let paddleProc = null;
   let paddleBuffer = '';
   let paddleWaiters = [];
-  // 子进程起不来（缺模型、杀毒软件拦截）就置位，本局内不再重试，避免每帧都卡一下
-  let paddleBroken = false;
+  // 子进程起不来（缺模型、杀软拦截）时先禁用一段时间，之后自动重试，
+  // 不能因为一次启动失败就整局退化成 Windows OCR。
+  const PADDLE_RETRY_MS = 5 * 60 * 1000;
+  let paddleDownUntil = 0;
 
   function stopPaddle() {
     paddleBuffer = '';
@@ -208,7 +217,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   }
 
   function startPaddle() {
-    if (paddleProc || paddleBroken) return;
+    if (paddleProc || Date.now() < paddleDownUntil) return;
     const script = path.join(__dirname, 'ocr-paddle.cjs');
     paddleProc = spawn(process.execPath, [script], {
       windowsHide: true,
@@ -247,7 +256,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     });
   }
 
-  function paddleSend(imagePath, timeout = 8000) {
+  function paddleSend(imagePath, attempt = 1, timeout = 8000) {
     return new Promise((resolve, reject) => {
       if (!paddleProc) startPaddle();
       if (!paddleProc) {
@@ -262,7 +271,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }, timeout);
       paddleWaiters.push(waiter);
       try {
-        paddleProc.stdin.write(`${JSON.stringify({ image: imagePath })}\n`);
+        paddleProc.stdin.write(`${JSON.stringify({ image: imagePath, attempt })}\n`);
       } catch (error) {
         clearTimeout(waiter.timer);
         const index = paddleWaiters.indexOf(waiter);
@@ -307,6 +316,70 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   // ————— 翻译 —————
   const cache = new Map();
+
+  // ————— 人名/称呼 —————
+  // 同一部作品里同一个角色要一直叫同一个名字；顺便用已知人名纠正 OCR 的形近字。
+  const glossary = new Map(Object.entries(readState().translateNames || {}));
+
+  function persistGlossary() {
+    writeState({ translateNames: Object.fromEntries(glossary) });
+  }
+
+  function speakerNames(text) {
+    return Array.from(String(text || '').matchAll(/【([^】]{1,8})】/g))
+      .map(match => match[1].trim())
+      .filter(Boolean);
+  }
+
+  function fixSpeakers(text) {
+    return String(text || '').replace(/【([^】]{1,8})】/g, (match, raw) => {
+      const name = raw.trim();
+      if (!name || glossary.has(name)) return match;
+      let best = '';
+      let bestDistance = 2;
+      for (const known of glossary.keys()) {
+        if (Math.abs(known.length - name.length) > 1) continue;
+        const distance = editDistance(name, known);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = known;
+        }
+      }
+      // 只差一个字的当作 OCR 抖动改回来，差得多的可能是新角色，留给 learnSpeakers
+      if (best && bestDistance <= 1) {
+        debugLog(`称呼纠正 ${name} → ${best}`);
+        return `【${best}】`;
+      }
+      return match;
+    });
+  }
+
+  function learnSpeakers(text) {
+    speakerNames(text).forEach(name => {
+      if (glossary.has(name)) return;
+      // 先占位，避免同一帧里重复发请求
+      glossary.set(name, '');
+      translateText(name)
+        .then(meaning => {
+          const zh = String(meaning || '').trim();
+          if (zh && zh !== name) {
+            glossary.set(name, zh);
+            // 换作品后旧人名会越攒越多，超量就从最早的开始丢
+            if (glossary.size > 80) glossary.delete(glossary.keys().next().value);
+            persistGlossary();
+          } else {
+            glossary.delete(name);
+          }
+        })
+        .catch(() => glossary.delete(name));
+    });
+  }
+
+  function glossaryHint() {
+    const pairs = [...glossary.entries()].filter(([, zh]) => zh).slice(0, 24);
+    if (!pairs.length) return '';
+    return `\n人物名对照（原文=译名，必须沿用）：${pairs.map(([ja, zh]) => `${ja}=${zh}`).join('，')}`;
+  }
 
   async function tencent(text) {
     const response = await fetch('https://transmart.qq.com/api/imt', {
@@ -357,7 +430,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
           {
             role: 'system',
             content:
-              '你是视觉小说翻译引擎。把用户给出的原文翻译成简体中文，只输出译文，不要解释、不要加引号，保留人物语气和称呼。'
+              '你是视觉小说翻译引擎。把用户给出的原文翻译成简体中文，只输出译文，不要解释、不要加引号，保留人物语气和称呼。' +
+              glossaryHint()
           },
           { role: 'user', content: text }
         ]
@@ -368,10 +442,25 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return String(data?.choices?.[0]?.message?.content || '').trim();
   }
 
+  // 接口偶尔抽风（超时、5xx）重试两次就够了；4xx 是配置问题，重试也没用
+  async function withRetry(run, attempts = 3) {
+    let lastError;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        return await run();
+      } catch (error) {
+        lastError = error;
+        if (/^http-4|missing-api-url/.test(String(error?.message || ''))) break;
+        await new Promise(resolve => setTimeout(resolve, 400 * (i + 1)));
+      }
+    }
+    throw lastError;
+  }
+
   function translateText(text) {
-    if (cfg.engine === 'google') return google(text);
-    if (cfg.engine === 'openai') return openaiCompatible(text);
-    return tencent(text);
+    if (cfg.engine === 'google') return withRetry(() => google(text));
+    if (cfg.engine === 'openai') return withRetry(() => openaiCompatible(text));
+    return withRetry(() => tencent(text));
   }
 
   // ————— 字幕窗 —————
@@ -827,6 +916,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   async function deliver(text) {
     lastText = text;
+    learnSpeakers(text);
     const seq = (deliverSeq += 1);
     const cached = cache.get(text);
     // 先把原文贴出来，译文回来后再补：长句翻译要一两秒，不能干等
@@ -984,12 +1074,19 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         `ocr base=${JSON.stringify(base.slice(0, 40))} alt=${JSON.stringify(alt.slice(0, 40))} pick=${text === alt ? 'alt' : 'base'}`
       );
     }
-    return text;
+    return fixSpeakers(text);
+  }
+
+  // 用离线词典给 OCR 结果打个分：正常台词几乎都能被切出来，乱码时未登录词会成片出现
+  async function measureQuality(text) {
+    if (!text) return { oov: 1, unknown: 0, total: 0, bad: true };
+    const result = await analyzer.check(text).catch(() => null);
+    return result || { oov: 0, unknown: 0, total: 0, bad: false };
   }
 
   async function processFrame() {
     if (captureMode === 'gdi' && canCaptureInHelper()) {
-      const usePaddle = cfg.ocrEngine === 'paddle' && !paddleBroken;
+      const usePaddle = cfg.ocrEngine === 'paddle' && Date.now() >= paddleDownUntil;
       const result = await captureInHelper(usePaddle);
       if (result.skip || result.wait) {
         // wait：字幕还在逐字显示或画面在动，识别进程让我们等稳定帧
@@ -997,20 +1094,50 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         return;
       }
       idleTicks = 0;
-      let payload = result;
+      let text = '';
       if (usePaddle) {
+        let payload;
         try {
-          payload = await paddleSend(result.img);
+          payload = await paddleSend(result.img, 1);
         } catch (error) {
-          // 只有 paddle 这一路挂了才回落，下一次识别照常走 Windows OCR
-          paddleBroken = true;
+          // 只有 paddle 这一路挂了才回落；过几分钟会自动再试
+          paddleDownUntil = Date.now() + PADDLE_RETRY_MS;
           stopPaddle();
-          debugLog(`paddle 不可用，回落 Windows OCR: ${error?.message || error}`);
-          console.warn('[PS 悬浮球] PaddleOCR 不可用，改用 Windows OCR', error?.message || error);
+          const reason = String(error?.message || error);
+          debugLog(`paddle 不可用，${Math.round(PADDLE_RETRY_MS / 60000)} 分钟后重试: ${reason}`);
+          console.warn(
+            '[PS 悬浮球] PaddleOCR 不可用，暂时改用 Windows OCR',
+            reason.startsWith('missing-model') ? `模型文件缺失（${reason}），请重新安装插件包` : reason
+          );
           return;
         }
+        text = await textFromResult(payload);
+        // 自检：生词率过高说明这帧基本是乱码，放大 1.5 倍复检一次再决定用哪份
+        const quality = await measureQuality(text);
+        if (quality.bad) {
+          debugLog(`ocr 自检生词率 ${quality.oov.toFixed(2)}（${quality.unknown}/${quality.total}），复检`);
+          let chosen = quality;
+          try {
+            const retry = await paddleSend(result.img, 2, 12000);
+            const retryText = await textFromResult(retry);
+            const retryQuality = await measureQuality(retryText);
+            debugLog(`ocr 复检生词率 ${retryQuality.oov.toFixed(2)}`);
+            if (!retryQuality.bad || retryQuality.oov < quality.oov) {
+              text = retryText;
+              chosen = retryQuality;
+            }
+          } catch (error) {
+            debugLog(`ocr 复检失败: ${error?.message || error}`);
+          }
+          if (chosen.bad) {
+            // 两份都像乱码：宁可不出字幕，也别把垃圾翻出来
+            debugLog(`ocr 结果疑似乱码，本轮跳过: ${JSON.stringify(text.slice(0, 40))}`);
+            return;
+          }
+        }
+      } else {
+        text = await textFromResult(result);
       }
-      const text = await textFromResult(payload);
       if (text) await acceptText(text);
       return;
     }
@@ -1103,7 +1230,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }
     if (cfg.region) {
       startOcr();
-      paddleBroken = false;
+      paddleDownUntil = 0;
       if (cfg.ocrEngine === 'paddle') startPaddle();
       captureMode = cfg.stream ? 'stream' : 'gdi';
       lastFrameAt = 0;
@@ -1339,7 +1466,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         lastText = '';
       }
       if (before.ocrEngine !== cfg.ocrEngine) {
-        paddleBroken = false;
+        paddleDownUntil = 0;
         stopPaddle();
         lastSignature = null;
         if (running && cfg.ocrEngine === 'paddle') startPaddle();

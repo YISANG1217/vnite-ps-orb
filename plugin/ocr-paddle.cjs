@@ -351,9 +351,13 @@ function cleanLine(text) {
   return text.replace(/([」』）】])\s*[！!|｜]+$/, '$1');
 }
 
-async function recognizeImage(filePath) {
+async function recognizeImage(filePath, attempt = 1) {
   await ensureSessions();
-  const img = decodeBmp(fs.readFileSync(filePath));
+  let img = decodeBmp(fs.readFileSync(filePath));
+  // 复检：整图放大 1.5 倍重跑一遍，小字和细描边会检出得更完整
+  if (attempt > 1) {
+    img = resizeRgb(img, Math.round(img.width * 1.5), Math.round(img.height * 1.5));
+  }
   const boxes = await detect(img);
   const lines = [];
   for (const box of boxes) {
@@ -363,21 +367,28 @@ async function recognizeImage(filePath) {
     lines.push({ text, top: box.top, bottom: box.bottom, left: box.left, score: result.score });
   }
   lines.sort((a, b) => a.top - b.top || a.left - b.left);
+  const confidence = lines.length
+    ? lines.reduce((sum, line) => sum + line.score, 0) / lines.length
+    : 0;
   return {
     lines: lines.map(line => line.text),
-    blocks: groupBlocks(lines)
+    blocks: groupBlocks(lines),
+    confidence
   };
 }
 
 async function handleLine(line) {
   let filePath = line;
+  let attempt = 1;
   if (line.startsWith('{')) {
     const payload = JSON.parse(line);
     filePath = String(payload.image || payload.path || '');
+    attempt = Number.parseInt(payload.attempt, 10);
+    if (!Number.isFinite(attempt) || attempt < 1) attempt = 1;
   }
   if (!filePath) return { error: 'bad-command' };
-  const result = await recognizeImage(filePath);
-  return { ...result, engine: 'paddle' };
+  const result = await recognizeImage(filePath, attempt);
+  return { ...result, engine: 'paddle', attempt };
 }
 
 async function main() {
