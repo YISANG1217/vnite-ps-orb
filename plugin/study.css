@@ -212,10 +212,25 @@ html.is-dragging * {
   line-height: 1.35;
   color: var(--muted);
   overflow-wrap: anywhere;
+  animation: fade-in 0.22s ease both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .word:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+
+/* 点开的词保持高亮，和下方详情卡对应得上 */
+.word.is-active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .word-detail {
@@ -226,6 +241,22 @@ html.is-dragging * {
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(17, 24, 37, 0.97);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.38);
+}
+
+/* 详情卡只在显示/隐藏时重播，不打断里面的滚动 */
+.word-detail:not([hidden]) {
+  animation: detail-in 0.18s ease both;
+}
+
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .detail-head {

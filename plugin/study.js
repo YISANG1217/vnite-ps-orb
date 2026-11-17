@@ -236,6 +236,7 @@
     if (!detailEl) return;
     detailEl.hidden = true;
     detailKey = '';
+    wordsEl.querySelectorAll('.word.is-active').forEach(node => node.classList.remove('is-active'));
   }
 
   // 词典词条 → 详情卡正文：义项逐条编号，后面附日汉对照例句
@@ -271,6 +272,9 @@
     }
     detailKey = key;
     detailEl.hidden = false;
+    // 只在当前词上留高亮，方便和浮动详情卡对上
+    wordsEl.querySelectorAll('.word.is-active').forEach(node => node.classList.remove('is-active'));
+    item.classList.add('is-active');
     detailWordEl.textContent = data.surface;
     const extra = [
       data.reading,
