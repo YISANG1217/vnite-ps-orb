@@ -52,21 +52,54 @@
     node.classList.add('is-fresh');
   }
 
+  let hideTimer = 0;
+  let shown = false;
+
+  function showBar() {
+    clearTimeout(hideTimer);
+    if (bar.hidden) {
+      bar.hidden = false;
+      bar.classList.add('is-hidden');
+      // 先让浏览器认下处于隐藏态的这一帧，下一帧再过渡出来
+      void bar.offsetWidth;
+    }
+    if (!shown) {
+      shown = true;
+      requestAnimationFrame(() => bar.classList.remove('is-hidden'));
+    }
+  }
+
+  // 先淡出再收起：窗口尺寸保持不变，避免每句都改一次透明窗口的交换链
+  function hideBar() {
+    if (!shown) {
+      bar.hidden = true;
+      return;
+    }
+    shown = false;
+    bar.classList.add('is-hidden');
+    bar.classList.remove('is-fresh');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (shown) return;
+      bar.hidden = true;
+    }, 180);
+  }
+
   function render({ original, translated }) {
     if (!original && !translated) {
-      bar.hidden = true;
-      reportHeight();
+      hideBar();
       return;
     }
     const next = translated || '';
-    const changed = bar.hidden || translatedEl.textContent !== next;
-    bar.hidden = false;
+    const changed = !shown || translatedEl.textContent !== next;
+    showBar();
     renderOriginal(original || '');
     translatedEl.textContent = next;
     translatedEl.classList.toggle('is-loading', next === PLACEHOLDER);
     fitFont(next);
     if (changed) replay(translatedEl);
-    requestAnimationFrame(reportHeight);
+    // 同步量一次高度：窗口跟着内容长矮，底部贴边，字幕不会跳一下
+    reportHeight();
   }
 
   function applyStyle({ fontSize, showOriginal }) {

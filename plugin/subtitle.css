@@ -25,17 +25,27 @@ body {
   align-items: flex-end;
   justify-content: center;
   height: 100%;
-  padding: 10px 14px 12px;
+  padding: 8px 12px 10px;
 }
 
+/* 宽度跟着文字走：先生成内容宽度，超过窗口就换行，不再固定占满 74% 屏宽 */
 .bar {
+  width: fit-content;
   max-width: 100%;
-  padding: 12px 24px 14px;
+  padding: 11px 22px 13px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.075);
   background: linear-gradient(180deg, rgba(9, 12, 20, 0.82), rgba(6, 8, 14, 0.92));
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28), 0 12px 28px rgba(0, 0, 0, 0.32);
-  animation: rise 0.18s ease both;
+  transform-origin: 50% 100%;
+  will-change: opacity, transform;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+/* 收起时先淡出再隐藏，不要「啪」地消失 */
+.bar.is-hidden {
+  opacity: 0;
+  transform: translateY(8px);
 }
 
 .bar[hidden] {
@@ -63,6 +73,8 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   letter-spacing: 0.01em;
   word-break: break-word;
+  /* 长句自动收字号时平滑过渡，不要一下跳小 */
+  transition: font-size 0.16s ease;
 }
 
 /* 换句时译文淡入上浮，避免生硬跳字 */
@@ -101,13 +113,3 @@ body {
   display: none;
 }
 
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}

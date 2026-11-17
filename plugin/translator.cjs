@@ -509,7 +509,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const display = cfg.region ? screen.getDisplayMatching(cfg.region) : screen.getPrimaryDisplay();
     const area = display.workArea;
     const width = Math.round(area.width * 0.74);
-    const height = clamp(subtitleBounds?.height || subtitleWin.getBounds().height || 168, 96, 320);
+    const height = clamp(subtitleBounds?.height || subtitleWin.getBounds().height || 168, 40, 320);
     const next = {
       x: area.x + Math.round((area.width - width) / 2),
       y: area.y + area.height - height - Math.round(area.height * 0.055),
