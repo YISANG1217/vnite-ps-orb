@@ -323,37 +323,83 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   const cache = new Map();
 
   // ————— 人名/称呼 —————
-  // 同一部作品里同一个角色要一直叫同一个名字；顺便用已知人名纠正 OCR 的形近字。
-  const glossary = new Map(Object.entries(readState().translateNames || {}));
+  // 同一部作品里同一个角色要一直叫同一个名字。OCR 偶尔会把生僻名字读成形近字
+  // （壬→王），只靠「第一次见到的写法」会把第一次的错误永久固定下来，
+  // 所以按出现次数投票：同一簇里出现最多的写法当标准名，其余变体往它上面归。
+  const NAME_RE = /【([^】]{1,8})】/g;
+  // 人名只允许假名和汉字：OCR 把引号、括号也吞进来时不能当成人名学习
+  const NAME_OK = /^[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]{1,8}$/;
+  const nameStats = new Map(
+    Object.entries(readState().nameStats || {})
+      .filter(([name]) => NAME_OK.test(name))
+      .map(([name, stat]) => [name, { count: Math.max(1, Number(stat?.count) || 1) }])
+  );
+  const glossary = new Map(
+    Object.entries(readState().translateNames || {}).filter(([name]) => NAME_OK.test(name))
+  );
+  const pendingNames = new Set();
+  let nameSaveTimer = null;
 
-  function persistGlossary() {
-    writeState({ translateNames: Object.fromEntries(glossary) });
+  // 已经翻译过的人名当作可信写法，给 5 次底分：
+  // 之后 OCR 偶尔读成形近字（计数 1）也不会把正确写法顶掉
+  Object.keys(glossary).forEach(name => {
+    if (!nameStats.has(name)) nameStats.set(name, { count: 5 });
+  });
+
+  function persistNames() {
+    writeState({
+      translateNames: Object.fromEntries(glossary),
+      nameStats: Object.fromEntries(nameStats)
+    });
+  }
+
+  // 每句都会调到这里，攒 4 秒再落盘，避免每行字幕都写一次状态文件
+  function scheduleNameSave() {
+    if (nameSaveTimer) return;
+    nameSaveTimer = setTimeout(() => {
+      nameSaveTimer = null;
+      persistNames();
+    }, 4000);
   }
 
   function speakerNames(text) {
-    return Array.from(String(text || '').matchAll(/【([^】]{1,8})】/g))
+    return Array.from(String(text || '').matchAll(NAME_RE))
       .map(match => match[1].trim())
-      .filter(Boolean);
+      .filter(name => name && NAME_OK.test(name));
+  }
+
+  // 两个写法是否同一个角色：单字名字太容易撞（武 / 慧 / 慧），只认完全相同；
+  // 两字以上允许差一个字，但必须至少有一半字符对齐
+  function sameName(a, b) {
+    if (a === b) return true;
+    if (a.length < 2 || b.length < 2) return false;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    const distance = editDistance(a, b);
+    return distance <= 1 && distance < Math.min(a.length, b.length);
+  }
+
+  // 同一簇里出现次数最多的写法就是标准名
+  function canonicalName(name) {
+    let best = name;
+    let bestCount = nameStats.get(name)?.count || 0;
+    for (const [variant, stat] of nameStats) {
+      if (!sameName(variant, name)) continue;
+      if (stat.count > bestCount) {
+        bestCount = stat.count;
+        best = variant;
+      }
+    }
+    return best;
   }
 
   function fixSpeakers(text) {
-    return String(text || '').replace(/【([^】]{1,8})】/g, (match, raw) => {
+    return String(text || '').replace(NAME_RE, (match, raw) => {
       const name = raw.trim();
-      if (!name || glossary.has(name)) return match;
-      let best = '';
-      let bestDistance = 2;
-      for (const known of glossary.keys()) {
-        if (Math.abs(known.length - name.length) > 1) continue;
-        const distance = editDistance(name, known);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = known;
-        }
-      }
-      // 只差一个字的当作 OCR 抖动改回来，差得多的可能是新角色，留给 learnSpeakers
-      if (best && bestDistance <= 1) {
-        debugLog(`称呼纠正 ${name} → ${best}`);
-        return `【${best}】`;
+      if (!name || !NAME_OK.test(name)) return match;
+      const canonical = canonicalName(name);
+      if (canonical !== name) {
+        debugLog(`称呼纠正 ${name} → ${canonical}`);
+        return `【${canonical}】`;
       }
       return match;
     });
@@ -361,22 +407,34 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   function learnSpeakers(text) {
     speakerNames(text).forEach(name => {
-      if (glossary.has(name)) return;
-      // 先占位，避免同一帧里重复发请求
-      glossary.set(name, '');
+      const stat = nameStats.get(name);
+      if (stat) stat.count += 1;
+      else nameStats.set(name, { count: 1 });
+      // 换作品后旧人名会越攒越多，超量就把出现次数最少的丢掉
+      if (nameStats.size > 80) {
+        let weakest = '';
+        let weakestCount = Infinity;
+        for (const [variant, item] of nameStats) {
+          if (item.count < weakestCount) {
+            weakestCount = item.count;
+            weakest = variant;
+          }
+        }
+        if (weakest) nameStats.delete(weakest);
+      }
+      scheduleNameSave();
+      if (glossary.has(name) || pendingNames.has(name)) return;
+      pendingNames.add(name);
       translateText(name)
         .then(meaning => {
           const zh = String(meaning || '').trim();
           if (zh && zh !== name) {
             glossary.set(name, zh);
-            // 换作品后旧人名会越攒越多，超量就从最早的开始丢
-            if (glossary.size > 80) glossary.delete(glossary.keys().next().value);
-            persistGlossary();
-          } else {
-            glossary.delete(name);
+            scheduleNameSave();
           }
         })
-        .catch(() => glossary.delete(name));
+        .catch(() => {})
+        .finally(() => pendingNames.delete(name));
     });
   }
 
@@ -1112,10 +1170,15 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         try {
           payload = await paddleSend(result.img, 1);
         } catch (error) {
-          // 只有 paddle 这一路挂了才回落；过几分钟会自动再试
+          const reason = String(error?.message || error);
+          // 开关翻译、切引擎时会主动停掉子进程，这不算故障，别进 5 分钟冷却
+          if (reason === 'paddle-stopped') {
+            debugLog('paddle 请求被打断，本轮忽略');
+            return;
+          }
+          // 只有真的起不来才回落；过几分钟会自动再试
           paddleDownUntil = Date.now() + PADDLE_RETRY_MS;
           stopPaddle();
-          const reason = String(error?.message || error);
           debugLog(`paddle 不可用，${Math.round(PADDLE_RETRY_MS / 60000)} 分钟后重试: ${reason}`);
           console.warn(
             '[PS 悬浮球] PaddleOCR 不可用，暂时改用 Windows OCR',
@@ -1124,6 +1187,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
           return;
         }
         text = await textFromResult(payload);
+        // 这一帧没有文字（过场黑屏、菜单界面）直接结束，不用自检和复检
+        if (!text) return;
         // 自检：生词率过高说明这帧基本是乱码，放大 1.5 倍复检一次再决定用哪份
         const quality = await measureQuality(text);
         if (quality.bad) {
@@ -1134,7 +1199,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
             const retryText = await textFromResult(retry);
             const retryQuality = await measureQuality(retryText);
             debugLog(`ocr 复检生词率 ${retryQuality.oov.toFixed(2)}`);
-            if (!retryQuality.bad || retryQuality.oov < quality.oov) {
+            if (retryText && (!retryQuality.bad || retryQuality.oov < quality.oov)) {
               text = retryText;
               chosen = retryQuality;
             }
@@ -1522,6 +1587,46 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return history;
   });
 
+  // 手动改名：用户看到 OCR 把生僻名字认错时可以一次性改正，
+  // 改完给新写法一个压倒性的计数，以后即使又读错也会被投票纠正回来
+  function renameSpeaker(from, to) {
+    if (!from || !to || from === to || !NAME_OK.test(to)) return;
+    const count = nameStats.get(from)?.count || 1;
+    nameStats.set(to, { count: Math.max(count, nameStats.get(to)?.count || 0) + 50 });
+    nameStats.delete(from);
+    const zh = glossary.get(to);
+    glossary.delete(from);
+    if (!zh) {
+      translateText(to)
+        .then(value => {
+          const text = String(value || '').trim();
+          if (text && text !== to) {
+            glossary.set(to, text);
+            persistNames();
+          }
+        })
+        .catch(() => {});
+    }
+    persistNames();
+  }
+
+  ipcMain.handle(CH.studyNames, event => {
+    if (!fromStudy(event)) return [];
+    return [...nameStats.entries()]
+      .map(([name, stat]) => ({ name, zh: glossary.get(name) || '', count: stat.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 40);
+  });
+
+  ipcMain.handle(CH.studyRename, (event, from, to) => {
+    if (!fromStudy(event)) return [];
+    renameSpeaker(String(from || ''), String(to || ''));
+    return [...nameStats.entries()]
+      .map(([name, stat]) => ({ name, zh: glossary.get(name) || '', count: stat.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 40);
+  });
+
   ipcMain.on(CH.captureFailed, (event, reason) => {
     if (!captureWin || event.sender !== captureWin.webContents) return;
     console.warn('[PS 悬浮球] 画面流不可用，改用直接截屏', reason);
@@ -1617,6 +1722,12 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     openOverlay,
     dispose() {
       running = false;
+      // 还没落盘的人名计数补一次，避免刚玩几分钟就关 Vnite 时白学
+      if (nameSaveTimer) {
+        clearTimeout(nameSaveTimer);
+        nameSaveTimer = null;
+        persistNames();
+      }
       if (loopTimer) clearTimeout(loopTimer);
       loopTimer = null;
       if (pumpTimer) clearTimeout(pumpTimer);
@@ -1637,6 +1748,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeHandler(CH.studyWordbookList);
       ipcMain.removeHandler(CH.studyWordbookExport);
       ipcMain.removeHandler(CH.studyHistory);
+      ipcMain.removeHandler(CH.studyNames);
+      ipcMain.removeHandler(CH.studyRename);
       [overlayWin, subtitleWin, studyWin, captureWin].forEach(target => {
         if (target && !target.isDestroyed()) target.destroy();
       });

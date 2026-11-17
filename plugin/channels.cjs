@@ -17,6 +17,8 @@ module.exports = {
     studyWordbookList: `${id}:tr-study-wordbook-list`,
     studyWordbookExport: `${id}:tr-study-wordbook-export`,
     studyHistory: `${id}:tr-study-history`,
+    studyNames: `${id}:tr-study-names`,
+    studyRename: `${id}:tr-study-rename`,
     captureStart: `${id}:tr-capture-start`,
     captureFrame: `${id}:tr-capture-frame`,
     captureFailed: `${id}:tr-capture-failed`

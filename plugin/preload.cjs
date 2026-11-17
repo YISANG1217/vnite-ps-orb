@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('psOrb', {
   wordbookList: () => ipcRenderer.invoke(TR.studyWordbookList),
   wordbookExport: () => ipcRenderer.invoke(TR.studyWordbookExport),
   history: () => ipcRenderer.invoke(TR.studyHistory),
+  names: () => ipcRenderer.invoke(TR.studyNames),
+  renameName: (from, to) => ipcRenderer.invoke(TR.studyRename, from, to),
   pushCaptureFrame: buffer => ipcRenderer.send(TR.captureFrame, buffer),
   captureFailed: reason => ipcRenderer.send(TR.captureFailed, String(reason || 'unknown')),
   resizeSubtitle: height => ipcRenderer.send(TR.resize, height),

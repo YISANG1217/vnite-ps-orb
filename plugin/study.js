@@ -379,17 +379,76 @@
     });
   }
 
+  function renderNames(items) {
+    items.forEach(entry => {
+      const item = drawerRow('drawer-item name-item');
+      const head = document.createElement('div');
+      head.className = 'drawer-item-head';
+      const nameBtn = document.createElement('button');
+      nameBtn.type = 'button';
+      nameBtn.className = 'name-edit';
+      nameBtn.textContent = entry.name;
+      nameBtn.title = 'OCR 认错了？点一下改成正确写法';
+      head.appendChild(nameBtn);
+      if (entry.zh) head.appendChild(span('zh-name', entry.zh));
+      head.appendChild(span('pos', `${entry.count} 次`));
+      item.appendChild(head);
+      drawerListEl.appendChild(item);
+      nameBtn.addEventListener('click', () => startRename(head, entry));
+    });
+  }
+
+  // 就地改成一个输入框，回车保存；保存后主进程会给新写法加权重，后续帧自动归到它
+  function startRename(head, entry) {
+    head.textContent = '';
+    const input = document.createElement('input');
+    input.className = 'name-input';
+    input.value = entry.name;
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'tool';
+    save.textContent = '保存';
+    head.append(input, save);
+    input.focus();
+    input.select();
+    const commit = async () => {
+      const next = input.value.trim();
+      if (!next || next === entry.name) {
+        refreshDrawer();
+        return;
+      }
+      await api.renameName(entry.name, next).catch(() => null);
+      refreshDrawer();
+    };
+    save.addEventListener('click', commit);
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') commit();
+      if (event.key === 'Escape') refreshDrawer();
+    });
+  }
+
+  // 重新拉一遍当前抽屉，不触发「再点一次就关掉」的开关逻辑
+  function refreshDrawer() {
+    const mode = drawerMode;
+    drawerMode = '';
+    openDrawer(mode);
+  }
+
   async function openDrawer(mode) {
+    if (!mode) return;
     if (drawerMode === mode && !drawerEl.hidden) {
       closeDrawer();
       return;
     }
     drawerMode = mode;
     drawerEl.hidden = false;
-    drawerTitleEl.textContent = mode === 'wordbook' ? '生词本' : '最近字幕';
+    drawerTitleEl.textContent =
+      mode === 'wordbook' ? '生词本' : mode === 'history' ? '最近字幕' : '人名';
     drawerExportEl.hidden = mode !== 'wordbook';
     drawerListEl.textContent = '';
-    const items = await (mode === 'wordbook' ? api.wordbookList() : api.history()).catch(() => []);
+    const items = await (
+      mode === 'wordbook' ? api.wordbookList() : mode === 'history' ? api.history() : api.names()
+    ).catch(() => []);
     if (drawerMode !== mode) return;
     if (mode === 'wordbook') {
       drawerHintEl.textContent = items.length ? `共 ${items.length} 个词 · 点单词自动收录` : '';
@@ -398,17 +457,27 @@
         return;
       }
       renderWordbook(items);
-    } else {
-      drawerHintEl.textContent = items.length ? `最近 ${items.length} 句` : '';
+      return;
+    }
+    if (mode === 'names') {
+      drawerHintEl.textContent = items.length ? `共 ${items.length} 个 · 点名字可改正` : '';
       if (!items.length) {
-        drawerListEl.appendChild(empty('还没有字幕记录'));
+        drawerListEl.appendChild(empty('还没遇到带【人名】的台词'));
         return;
       }
-      renderHistory(items);
+      renderNames(items);
+      return;
     }
+    drawerHintEl.textContent = items.length ? `最近 ${items.length} 句` : '';
+    if (!items.length) {
+      drawerListEl.appendChild(empty('还没有字幕记录'));
+      return;
+    }
+    renderHistory(items);
   }
 
   document.getElementById('wordbookBtn')?.addEventListener('click', () => openDrawer('wordbook'));
+  document.getElementById('namesBtn')?.addEventListener('click', () => openDrawer('names'));
   document.getElementById('historyBtn')?.addEventListener('click', () => openDrawer('history'));
   document.getElementById('drawerClose')?.addEventListener('click', closeDrawer);
   drawerExportEl?.addEventListener('click', async () => {
