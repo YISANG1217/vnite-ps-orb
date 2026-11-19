@@ -33,8 +33,8 @@
     return hash;
   }
 
-  // 人名标签：兼容 __【武】 这类中文括号，偶尔 OCR 会把【】认成形近的〔〕［］
-  const NAME_RE = /^[【〔［]([^】〕］]{1,10})[】〕］]([\s\S]*)$/;
+  // 人名标签：兼容【】〔〕［］，以及 OCR 把 】 认成台词引号 」』 的情况
+  const NAME_RE = /^[【〔［]([^】〕］」』]{1,10})[】〕］」』]([\s\S]*)$/;
   // 名字里必须至少有一个假名或汉字，避免把符号当成角色
   const NAME_OK = /[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]/;
 
@@ -46,7 +46,7 @@
     if (direct && NAME_OK.test(direct[1])) {
       return { name: direct[1].trim(), rest: direct[2] };
     }
-    const loose = /^([\s\S]{1,2}?)[【〔［]([^】〕］]{1,10})[】〕］]([\s\S]*)$/.exec(head);
+    const loose = /^([\s\S]{1,2}?)[【〔［]([^】〕］」』]{1,10})[】〕］」』]([\s\S]*)$/.exec(head);
     if (loose && !/[A-Za-z0-9]/.test(loose[1]) && NAME_OK.test(loose[2])) {
       return { name: loose[2].trim(), rest: loose[3] };
     }
