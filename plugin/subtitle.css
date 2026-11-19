@@ -41,9 +41,9 @@ body {
     radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 76%),
     linear-gradient(180deg, rgba(9, 12, 20, 0.82), rgba(6, 8, 14, 0.92));
   box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
     0 2px 6px rgba(0, 0, 0, 0.28),
-    0 12px 28px rgba(0, 0, 0, 0.32),
-    0 -22px 46px -30px color-mix(in srgb, var(--accent) 42%, transparent);
+    0 12px 28px rgba(0, 0, 0, 0.32);
   transform-origin: 50% 100%;
   will-change: opacity, transform;
   transition:
@@ -51,34 +51,6 @@ body {
     transform 0.16s ease,
     border-color 0.6s ease,
     background 0.6s ease;
-}
-
-/* 顶部微光呼吸：光晕从边缘缓缓透出再收回，幅度很小，不干扰读字幕 */
-.bar::after {
-  content: "";
-  position: absolute;
-  left: 6%;
-  right: 6%;
-  top: -20px;
-  height: 24px;
-  border-radius: 50%;
-  background: radial-gradient(60% 100% at 50% 100%, color-mix(in srgb, var(--accent) 40%, transparent), transparent 78%);
-  filter: blur(6px);
-  opacity: 0.4;
-  animation: barBreathe 4.2s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes barBreathe {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: translateY(1px) scaleX(0.95);
-  }
-  50% {
-    opacity: 0.7;
-    transform: translateY(-1px) scaleX(1.02);
-  }
 }
 
 /* 收起时先淡出再隐藏，不要「啪」地消失 */
@@ -111,6 +83,18 @@ body {
   color: hsl(var(--hue) 78% 78%);
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* 译文前的主题色竖线：比光晕安静，但每句都能看到一点颜色 */
+.translated::before {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.84em;
+  margin-right: 9px;
+  border-radius: 1px;
+  vertical-align: -0.05em;
+  background: color-mix(in srgb, var(--accent) 68%, transparent);
 }
 
 .translated {

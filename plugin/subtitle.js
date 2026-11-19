@@ -11,10 +11,9 @@
   const PLACEHOLDER = '翻译中…';
 
   // 内容变化后把实际高度回传给主进程，字幕窗底边保持不动。
-  // 多留 34px：底板顶部有一层会呼吸的外发光，窗口不够高会被裁掉。
   function reportHeight() {
     const rect = bar.getBoundingClientRect();
-    const height = Math.ceil(rect.height + 34);
+    const height = Math.ceil(rect.height + 22);
     if (Math.abs(height - pendingHeight) < 2) return;
     pendingHeight = height;
     api.resizeSubtitle(height);
