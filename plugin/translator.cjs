@@ -991,6 +991,16 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   let deliverSeq = 0;
 
+  // 只翻台词本体：把【人名】和整句外层的「」去掉再送翻译。
+  // 带着【武】送进去，腾讯会把整句翻成「（武）……」，名字把台词带偏了。
+  function dialogueOf(text) {
+    const raw = String(text || '');
+    let body = raw.replace(NAME_RE, '').trim();
+    const wrapped = /^[「『]([\s\S]*)[」』]$/.exec(body);
+    if (wrapped) body = wrapped[1].trim();
+    return body || raw;
+  }
+
   async function deliver(text) {
     lastText = text;
     learnSpeakers(text);
@@ -1008,7 +1018,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       rememberLine(text, cached);
       return;
     }
-    const translated = await translateText(text).catch(error => {
+    const translated = await translateText(dialogueOf(text)).catch(error => {
       console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
       return '';
     });
