@@ -8,6 +8,7 @@
 
   let pendingHeight = 0;
   let baseFont = 22;
+  let showOriginalEnabled = true;
   const PLACEHOLDER = '翻译中…';
 
   // 内容变化后把实际高度回传给主进程，字幕窗底边保持不动。
@@ -33,33 +34,61 @@
     return hash;
   }
 
-  // 说话人标签【武】单独着色，和台词正文区分开
-  function renderOriginal(text) {
-    originalEl.textContent = '';
+  // 上一句原文渐隐后保留 3 秒，方便对照上下文
+  const ghostEl = document.createElement('p');
+  ghostEl.className = 'original ghost';
+  ghostEl.hidden = true;
+  originalEl.before(ghostEl);
+  let ghostTimer = 0;
+
+  // 允许前面混进空格/全角空格：OCR 有时会把缩进一起带出来
+  const NAME_RE = /^[\s\u3000]*【([^】]{1,10})】([\s\S]*)$/;
+
+  // 把一段原文渲染进指定元素：说话人渲染成「首字圆形徽章 + 名字」的角色标签
+  function fillOriginal(el, text) {
+    el.textContent = '';
     const raw = String(text || '');
     if (!raw.trim()) {
-      originalEl.hidden = true;
+      el.hidden = true;
       return;
     }
-    originalEl.hidden = false;
-    // 允许前面混进空格/全角空格：OCR 有时会把缩进一起带出来
-    const match = /^[\s\u3000]*【([^】]{1,10})】([\s\S]*)$/.exec(raw);
+    el.hidden = false;
+    const match = NAME_RE.exec(raw);
     if (!match) {
-      originalEl.textContent = raw;
+      el.textContent = raw;
       return;
     }
     const speaker = document.createElement('span');
     speaker.className = 'speaker';
-    speaker.textContent = match[1];
     speaker.style.setProperty('--hue', String(speakerHue(match[1])));
-    originalEl.append(speaker, document.createTextNode(match[2]));
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar';
+    avatar.textContent = [...match[1]][0];
+    const label = document.createElement('span');
+    label.className = 'speaker-name';
+    label.textContent = match[1];
+    speaker.append(avatar, label);
+    el.append(speaker, document.createTextNode(match[2]));
   }
 
-  // 同一个动画要在连续换句时重播，先摘掉类再强制回流一次
-  function replay(node) {
-    node.classList.remove('is-fresh');
-    void node.offsetWidth;
-    node.classList.add('is-fresh');
+  function showGhost(text) {
+    if (!showOriginalEnabled) return;
+    fillOriginal(ghostEl, text);
+    ghostEl.hidden = false;
+    clearTimeout(ghostTimer);
+    ghostTimer = setTimeout(() => {
+      ghostEl.hidden = true;
+      ghostEl.textContent = '';
+      requestAnimationFrame(reportHeight);
+    }, 3000);
+  }
+
+  function renderOriginal(text) {
+    const raw = String(text || '');
+    const prev = originalEl.dataset.text || '';
+    if (prev && raw && raw !== prev) showGhost(prev);
+    originalEl.dataset.text = raw;
+    fillOriginal(originalEl, raw);
   }
 
   let hideTimer = 0;
@@ -83,16 +112,43 @@
   function hideBar() {
     if (!shown) {
       bar.hidden = true;
+      ghostEl.hidden = true;
+      ghostEl.textContent = '';
       return;
     }
     shown = false;
     bar.classList.add('is-hidden');
-    bar.classList.remove('is-fresh');
+    clearTimeout(ghostTimer);
+    ghostEl.hidden = true;
+    ghostEl.textContent = '';
+    originalEl.dataset.text = '';
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       if (shown) return;
       bar.hidden = true;
     }, 180);
+  }
+
+  // 译文按标点切成小段错峰淡入：不是打字机，只是给长句一点阅读节奏
+  function paintTranslated(text) {
+    translatedEl.textContent = '';
+    if (!text) return;
+    if (text === PLACEHOLDER) {
+      translatedEl.textContent = text;
+      return;
+    }
+    const parts = String(text).match(/[^、。，！？…；：,.!?;:]+[、。，！？…；：,.!?;:]*/g) || [text];
+    // 段数太多就合并，保证淡入总时长不超过 0.3 秒
+    const step = Math.max(1, Math.ceil(parts.length / 5));
+    let index = 0;
+    for (let i = 0; i < parts.length; i += step) {
+      const seg = document.createElement('span');
+      seg.className = 'seg';
+      seg.textContent = parts.slice(i, i + step).join('');
+      seg.style.animationDelay = `${Math.min(280, index * 60)}ms`;
+      translatedEl.append(seg);
+      index += 1;
+    }
   }
 
   function render({ original, translated }) {
@@ -101,13 +157,15 @@
       return;
     }
     const next = translated || '';
-    const changed = !shown || translatedEl.textContent !== next;
+    const changed = !shown || translatedEl.dataset.text !== next;
     showBar();
     renderOriginal(original || '');
-    translatedEl.textContent = next;
-    translatedEl.classList.toggle('is-loading', next === PLACEHOLDER);
-    fitFont(next);
-    if (changed) replay(translatedEl);
+    if (changed) {
+      translatedEl.dataset.text = next;
+      paintTranslated(next);
+      translatedEl.classList.toggle('is-loading', next === PLACEHOLDER);
+      fitFont(next);
+    }
     // 同步量一次高度：窗口跟着内容长矮，底部贴边，字幕不会跳一下
     reportHeight();
   }
@@ -118,8 +176,12 @@
       document.documentElement.style.setProperty('--font-size', `${fontSize}px`);
       fitFont(translatedEl.textContent);
     }
-    if (!showOriginal) {
+    showOriginalEnabled = showOriginal !== false;
+    if (!showOriginalEnabled) {
       originalEl.hidden = true;
+      ghostEl.hidden = true;
+      ghostEl.textContent = '';
+      clearTimeout(ghostTimer);
     }
     requestAnimationFrame(reportHeight);
   }
