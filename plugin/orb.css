@@ -139,6 +139,22 @@ body {
   pointer-events: none;
 }
 
+/* 点击时一圈光晕扩散出去 */
+.orb.is-pulsing .orb-glow {
+  animation: orbPulse 0.62s ease-out;
+}
+
+@keyframes orbPulse {
+  0% {
+    opacity: 0.95;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
 .orb-shell {
   position: absolute;
   inset: 0;
@@ -157,6 +173,16 @@ body {
     0 10px 22px rgba(0, 0, 0, 0.2),
     0 0 0 1px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* 悬停微放大、按下微缩，点击另有光晕扩散 */
+.orb:hover .orb-shell {
+  transform: scale(1.04);
+}
+
+.orb.is-press .orb-shell {
+  transform: scale(0.94);
 }
 
 .orb-shell::after {

@@ -507,6 +507,14 @@
     api.dragMove();
   }
 
+  orb.addEventListener('click', () => {
+    // 点击时让光晕扩散一圈：给一个「按下去了」的即时反馈
+    orb.classList.remove('is-pulsing');
+    void orb.offsetWidth;
+    orb.classList.add('is-pulsing');
+    setTimeout(() => orb.classList.remove('is-pulsing'), 640);
+  });
+
   orb.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
     orb.setPointerCapture(event.pointerId);

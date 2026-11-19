@@ -126,6 +126,11 @@
 
   api.onSubtitle(render);
   api.onSubtitleStyle(applyStyle);
+  api.onAccent(hex => {
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) return;
+    // 主题色跟着画面走；胶囊的色相是每个角色固定的，这里只改整体强调色
+    document.documentElement.style.setProperty('--accent', hex);
+  });
 
   // 首次加载时按当前 CSS 变量上报一次高度，避免字幕窗初始过高。
   requestAnimationFrame(() => {

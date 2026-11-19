@@ -101,6 +101,130 @@ try {
   # 设置失败不影响识别
 }
 
+# 从画面里挑一个好看的主色给字幕条用：只取饱和度高、明度适中的像素求平均，
+# 再把结果压进固定的饱和度/明度区间，避免采样到大片肤色或暗背景后字幕变得脏。
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+namespace PsOrb {
+  public static class Accent {
+    public static string FromBitmap(Bitmap bmp) {
+      if (bmp == null) return "";
+      Bitmap src = bmp;
+      bool owned = false;
+      // 抓屏得到的是 32bpp，LockBits 必须按实际格式来，所以先统一转成 24bpp
+      if (Image.GetPixelFormatSize(bmp.PixelFormat) != 24) {
+        src = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format24bppRgb);
+        using (Graphics g = Graphics.FromImage(src)) {
+          g.DrawImage(bmp, 0, 0, bmp.Width, bmp.Height);
+        }
+        owned = true;
+      }
+      BitmapData data = src.LockBits(new Rectangle(0, 0, src.Width, src.Height), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+      double sumR = 0, sumG = 0, sumB = 0, weight = 0;
+      try {
+        int stride = data.Stride;
+        int bytes = stride * src.Height;
+        byte[] buf = new byte[bytes];
+        Marshal.Copy(data.Scan0, buf, 0, bytes);
+        int step = src.Width > 200 ? 4 : 2;
+        for (int y = 0; y < src.Height; y += step) {
+          int row = y * stride;
+          for (int x = 0; x < src.Width; x += step) {
+            int i = row + x * 3;
+            double b = buf[i], g = buf[i + 1], r = buf[i + 2];
+            double max = Math.Max(r, Math.Max(g, b));
+            double min = Math.Min(r, Math.Min(g, b));
+            if (max < 50 || max > 245) continue;
+            double s = max <= 0 ? 0 : (max - min) / max;
+            double v = max / 255.0;
+            if (s < 0.35 || v < 0.25 || v > 0.92) continue;
+            double w = s * (1.0 - Math.Abs(v - 0.6));
+            sumR += r * w; sumG += g * w; sumB += b * w; weight += w;
+          }
+        }
+      } finally {
+        src.UnlockBits(data);
+        if (owned) src.Dispose();
+      }
+      if (weight <= 0) return "";
+      double ar = sumR / weight, ag = sumG / weight, ab = sumB / weight;
+      double h, sat, light;
+      ToHsl(ar, ag, ab, out h, out sat, out light);
+      // 固定观感：饱和度 62%，明度 62%，色相跟随画面
+      return FromHsl(h, 0.62, 0.62);
+    }
+
+    static void ToHsl(double r, double g, double b, out double h, out double s, out double l) {
+      r /= 255; g /= 255; b /= 255;
+      double max = Math.Max(r, Math.Max(g, b));
+      double min = Math.Min(r, Math.Min(g, b));
+      l = (max + min) / 2;
+      if (max == min) { h = 0; s = 0; return; }
+      double d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max == r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max == g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+
+    static string FromHsl(double h, double s, double l) {
+      double r, g, b;
+      if (s == 0) { r = g = b = l; }
+      else {
+        double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        double p = 2 * l - q;
+        r = Hue(p, q, h + 1.0 / 3);
+        g = Hue(p, q, h);
+        b = Hue(p, q, h - 1.0 / 3);
+      }
+      return string.Format("#{0:x2}{1:x2}{2:x2}", (int)Math.Round(r * 255), (int)Math.Round(g * 255), (int)Math.Round(b * 255));
+    }
+
+    static double Hue(double p, double q, double t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+      if (t < 1.0 / 2) return q;
+      if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+      return p;
+    }
+  }
+}
+"@
+
+# 前台窗口：游戏被别的窗口盖住时不要再抓屏 —— 抓到的会是聊天窗/桌面，
+# 既白烧 OCR 也把垃圾文字送进翻译。只判断框选区域的中心点是否落在前台窗口内。
+Add-Type -MemberDefinition @"
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+[StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+"@ -Name 'Fg' -Namespace 'PsOrb'
+
+function Test-ForegroundCovers([int]$x, [int]$y, [int]$w, [int]$h) {
+  try {
+    $hwnd = [PsOrb.Fg]::GetForegroundWindow()
+    if ($hwnd -eq [IntPtr]::Zero) { return $true }
+    # 前台可能是输入法候选框、浮动提示这类小弹窗，先上溯到最外层所属窗口再判断
+    $root = [PsOrb.Fg]::GetAncestor($hwnd, 3)
+    if ($root -ne [IntPtr]::Zero) { $hwnd = $root }
+    $rect = New-Object 'PsOrb.Fg+RECT'
+    if (-not [PsOrb.Fg]::GetWindowRect($hwnd, [ref]$rect)) { return $true }
+    if ($rect.Right -le $rect.Left -or $rect.Bottom -le $rect.Top) { return $true }
+    $cx = $x + [int]($w / 2)
+    $cy = $y + [int]($h / 2)
+    return ($cx -ge $rect.Left -and $cx -le $rect.Right -and $cy -ge $rect.Top -and $cy -le $rect.Bottom)
+  } catch {
+    # 判断失败就当没被遮挡，宁可多识别一次也不要漏台词
+    return $true
+  }
+}
+
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime]
 $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType=WindowsRuntime]
@@ -388,11 +512,18 @@ while ($true) {
   $line = $line.Trim()
   if ($line -eq '') { continue }
   try {
-    if ($line.StartsWith('capimg ')) {
+    if ($line.StartsWith('capimg ') -or $line.StartsWith('capimgfg ')) {
       # 只抓图不识别：画面稳定时存成 BMP，交给主进程的 PaddleOCR 子进程。
       # 画面指纹和等稳定帧的逻辑仍然留在这里，避免对没变化的帧跑一遍模型。
-      $cap = ConvertTo-CaptureArgs (($line.Substring(7).Trim()) -split '\s+')
+      # capimgfg 额外要求游戏窗口在前台，被别的窗口盖住时直接跳过。
+      $fgOnly = $line.StartsWith('capimgfg ')
+      $payload = if ($fgOnly) { $line.Substring(9) } else { $line.Substring(7) }
+      $cap = ConvertTo-CaptureArgs ($payload.Trim() -split '\s+')
       if (-not $cap) { Write-Line '{"error":"bad-capture-args"}'; continue }
+      if ($fgOnly -and -not (Test-ForegroundCovers $cap.X $cap.Y $cap.W $cap.H)) {
+        Write-Line '{"skip":"fg"}'
+        continue
+      }
       $bmp = Get-CaptureBitmap $cap.X $cap.Y $cap.W $cap.H $cap.Masks
       try {
         $state = Test-FrameChange $bmp
@@ -401,7 +532,14 @@ while ($true) {
         if ($state -eq 'wait') { Write-Line '{"wait":true}'; continue }
         $imgPath = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'local-vnite-ps-orb-frame.bmp')
         $bmp.Save($imgPath, [System.Drawing.Imaging.ImageFormat]::Bmp)
-        Write-Line (@{ img = $imgPath } | ConvertTo-Json -Compress)
+        $result = @{ img = $imgPath }
+        try {
+          $accent = [PsOrb.Accent]::FromBitmap($bmp)
+          if ($accent) { $result.accent = $accent }
+        } catch {
+          # 取色失败不影响识别
+        }
+        Write-Line ($result | ConvertTo-Json -Compress)
       } finally {
         $bmp.Dispose()
       }

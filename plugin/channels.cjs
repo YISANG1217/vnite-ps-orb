@@ -12,6 +12,7 @@ module.exports = {
     studyDragStart: `${id}:tr-study-drag-start`,
     studyDragEnd: `${id}:tr-study-drag-end`,
     studyResize: `${id}:tr-study-resize`,
+    accent: `${id}:tr-accent`,
     studyLookup: `${id}:tr-study-lookup`,
     studyWordbookAdd: `${id}:tr-study-wordbook-add`,
     studyWordbookList: `${id}:tr-study-wordbook-list`,

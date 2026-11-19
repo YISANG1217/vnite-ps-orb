@@ -54,6 +54,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     study: false,
     stream: false,
     ocrEngine: 'paddle',
+    foregroundOnly: true,
+    themeColor: true,
     subtitlePos: 'bottom',
     subtitleOffset: 0,
     region: null
@@ -102,6 +104,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const offset = Number.parseInt(preferences?.translateSubtitleOffset, 10);
     cfg.subtitleOffset = Number.isFinite(offset) ? clamp(offset, 0, 300) : 0;
     cfg.ocrEngine = preferences?.translateOcrEngine === 'windows' ? 'windows' : 'paddle';
+    cfg.foregroundOnly = preferences?.translateForegroundOnly !== false;
+    cfg.themeColor = preferences?.translateThemeColor !== false;
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
   }
@@ -566,6 +570,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     // 字幕窗不接收任何鼠标事件；不开 forward，避免每次鼠标移动都往渲染进程转发事件
     subtitleWin.setIgnoreMouseEvents(true);
     subtitleWin.loadFile(path.join(__dirname, 'subtitle.html'));
+    subtitleWin.webContents.on('did-finish-load', () => {
+      if (lastAccent) subtitleWin.webContents.send(CH.accent, lastAccent);
+    });
     subtitleWin.on('closed', () => {
       subtitleWin = null;
       subtitleBounds = null;
@@ -1101,7 +1108,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     const width = Math.max(8, Math.round(cfg.region.width * scale));
     const height = Math.max(8, Math.round(cfg.region.height * scale));
     const masks = maskRects(scale);
-    const command = captureOnly ? 'capimg' : 'cap';
+    const command = captureOnly ? (cfg.foregroundOnly ? 'capimgfg' : 'capimg') : 'cap';
     return ocrSend(`${command} ${x} ${y} ${width} ${height}${masks}`, 5000);
   }
 
@@ -1173,6 +1180,20 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return result || { oov: 0, unknown: 0, total: 0, bad: false };
   }
 
+  // ————— 主题取色 —————
+  let lastAccent = '';
+  const DEFAULT_ACCENT = '#5b9dff';
+
+  // 从画面里采样出的主色发给字幕窗；关掉主题取色就回到默认蓝
+  function applyAccent(hex) {
+    const color = cfg.themeColor && /^#[0-9a-f]{6}$/i.test(hex || '') ? hex : DEFAULT_ACCENT;
+    if (color === lastAccent) return;
+    lastAccent = color;
+    if (subtitleWin && !subtitleWin.isDestroyed()) {
+      subtitleWin.webContents.send(CH.accent, color);
+    }
+  }
+
   async function processFrame() {
     if (captureMode === 'gdi' && canCaptureInHelper()) {
       const usePaddle = cfg.ocrEngine === 'paddle' && Date.now() >= paddleDownUntil;
@@ -1183,6 +1204,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         return;
       }
       idleTicks = 0;
+      applyAccent(result.accent);
       let text = '';
       if (usePaddle) {
         let payload;
@@ -1290,8 +1312,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       }
       if (failures === 3) stopOcr();
     }
-    // 子进程抓屏很便宜，不需要降频（降频会让新台词晚 1-3 秒才出现）；
-    // 只有回落到主进程截图时才降频，避免反复抓全屏
+    // 子进程抓屏本身很便宜，只在长时间没变化时轻微降频（最多 +60%），
+    // 新台词出现时仍然在 1~2 秒内识别出来；回落到主进程截图时降得更多
     const backoff =
       captureMode === 'electron'
         ? idleTicks >= 10
@@ -1299,7 +1321,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
           : idleTicks >= 3
             ? Math.round(cfg.interval * 0.6)
             : 0
-        : 0;
+        : idleTicks >= 15
+          ? Math.round(cfg.interval * 0.6)
+          : 0;
     schedule(Math.max(150, cfg.interval + backoff - (Date.now() - started)));
   }
 

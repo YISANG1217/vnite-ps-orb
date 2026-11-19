@@ -56,6 +56,8 @@
       const role = document.createElement('span');
       role.className = 'role';
       role.textContent = chunk.role;
+      // 同一个语法角色永远同一个色相，扫一眼就能看出句子骨架
+      role.style.setProperty('--hue', String(hueOf(chunk.role)));
       const text = document.createElement('span');
       text.textContent = chunk.text;
       item.append(role, text);
@@ -340,6 +342,13 @@
     node.className = className;
     node.textContent = text;
     return node;
+  }
+
+  // 把任意标签映射成固定色相：同一个词性/语法角色永远同一个颜色
+  function hueOf(text) {
+    let hash = 0;
+    for (const ch of String(text || '')) hash = (hash * 31 + ch.codePointAt(0)) % 360;
+    return hash;
   }
 
   function closeDrawer() {

@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('psOrb', {
   onStudy: callback => {
     ipcRenderer.on(TR.study, (_event, payload) => callback(payload));
   },
+  onAccent: callback => {
+    ipcRenderer.on(TR.accent, (_event, hex) => callback(String(hex || '')));
+  },
   onCaptureStart: callback => {
     ipcRenderer.on(TR.captureStart, (_event, payload) => callback(payload));
   },
