@@ -150,11 +150,15 @@
     reportHeight();
   }
 
-  function applyStyle({ fontSize, showOriginal }) {
+  function applyStyle({ fontSize, showOriginal, skin }) {
     if (Number.isFinite(fontSize)) {
       baseFont = fontSize;
       document.documentElement.style.setProperty('--font-size', `${fontSize}px`);
       fitFont(translatedEl.textContent);
+    }
+    // 皮肤只切 CSS 变量，不重建任何节点
+    if (typeof skin === 'string' && skin) {
+      document.documentElement.dataset.skin = skin;
     }
     if (!showOriginal) {
       originalEl.hidden = true;

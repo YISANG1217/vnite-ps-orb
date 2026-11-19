@@ -3,6 +3,89 @@
   --accent: #5b9dff;
   --ink: #f4f8ff;
   --muted: rgba(214, 230, 255, 0.56);
+
+  /* 皮肤只换这几个变量，结构样式全部共用 */
+  --bar-pad: 11px 22px 13px;
+  --bar-radius: 6px 20px 20px 20px;
+  --bar-bg:
+    radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 76%),
+    linear-gradient(180deg, rgba(9, 12, 20, 0.82), rgba(6, 8, 14, 0.92));
+  --bar-border: color-mix(in srgb, var(--accent) 24%, transparent);
+  --bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 2px 6px rgba(0, 0, 0, 0.28),
+    0 12px 28px rgba(0, 0, 0, 0.32);
+  --text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --original-shadow: none;
+  --line: color-mix(in srgb, var(--accent) 68%, transparent);
+
+  /* 角色胶囊：色相由 --hue 决定，这里只调明暗和透明度，皮肤改起来不动结构 */
+  --speaker-fill: 0.18;
+  --speaker-ring: 0.3;
+  --speaker-sat: 78%;
+  --speaker-lit: 80%;
+}
+
+/* ————— 皮肤：亮白 ————— */
+html[data-skin="light"] {
+  --ink: #18202c;
+  --muted: rgba(38, 52, 76, 0.58);
+  --bar-bg:
+    radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 76%),
+    linear-gradient(180deg, rgba(252, 253, 255, 0.94), rgba(235, 240, 248, 0.96));
+  --bar-border: color-mix(in srgb, var(--accent) 26%, rgba(120, 140, 170, 0.32));
+  --bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 6px rgba(20, 30, 50, 0.12),
+    0 12px 28px rgba(20, 30, 50, 0.16);
+  --text-shadow: none;
+  --line: color-mix(in srgb, var(--accent) 72%, rgba(40, 60, 90, 0.2));
+  --speaker-fill: 0.14;
+  --speaker-ring: 0.26;
+  --speaker-sat: 55%;
+  --speaker-lit: 34%;
+}
+
+/* ————— 皮肤：暖纸 ————— */
+html[data-skin="paper"] {
+  --ink: #3b3226;
+  --muted: rgba(92, 76, 54, 0.62);
+  --bar-bg:
+    radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 76%),
+    linear-gradient(180deg, rgba(248, 243, 231, 0.93), rgba(238, 230, 212, 0.95));
+  --bar-border: color-mix(in srgb, var(--accent) 18%, rgba(150, 122, 82, 0.38));
+  --bar-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 2px 6px rgba(60, 42, 20, 0.14),
+    0 12px 28px rgba(60, 42, 20, 0.18);
+  --text-shadow: none;
+  --line: color-mix(in srgb, var(--accent) 55%, #9a7b46);
+  --speaker-fill: 0.16;
+  --speaker-ring: 0.28;
+  --speaker-sat: 48%;
+  --speaker-lit: 32%;
+}
+
+/* ————— 皮肤：极简无底板 ————— */
+/* 只有文字和主题色竖线，靠描边保证在任何画面上都读得清 */
+html[data-skin="minimal"] {
+  --ink: #ffffff;
+  --muted: rgba(255, 255, 255, 0.78);
+  --bar-pad: 4px 8px 6px;
+  --bar-bg: none;
+  --bar-border: transparent;
+  --bar-shadow: none;
+  --text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 10px rgba(0, 0, 0, 0.7);
+  --original-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(0, 0, 0, 0.65);
+  --line: color-mix(in srgb, var(--accent) 85%, transparent);
+  --speaker-fill: 0.32;
+  --speaker-ring: 0.5;
+  --speaker-sat: 85%;
+  --speaker-lit: 88%;
 }
 
 * {
@@ -33,24 +116,20 @@ body {
   position: relative;
   width: fit-content;
   max-width: 100%;
-  padding: 11px 22px 13px;
-  border-radius: 6px 20px 20px 20px;
-  /* 描边和顶部微光跟随主题色（从游戏画面采样），整体仍然保持深底不抢戏 */
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  background:
-    radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 76%),
-    linear-gradient(180deg, rgba(9, 12, 20, 0.82), rgba(6, 8, 14, 0.92));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 2px 6px rgba(0, 0, 0, 0.28),
-    0 12px 28px rgba(0, 0, 0, 0.32);
+  padding: var(--bar-pad);
+  border-radius: var(--bar-radius);
+  /* 描边和顶部微光跟随主题色（从游戏画面采样），整体仍然保持不抢戏 */
+  border: 1px solid var(--bar-border);
+  background: var(--bar-bg);
+  box-shadow: var(--bar-shadow);
   transform-origin: 50% 100%;
   will-change: opacity, transform;
   transition:
     opacity 0.16s ease,
     transform 0.16s ease,
     border-color 0.6s ease,
-    background 0.6s ease;
+    background 0.6s ease,
+    box-shadow 0.6s ease;
 }
 
 /* 收起时先淡出再隐藏，不要「啪」地消失 */
@@ -69,6 +148,7 @@ body {
   line-height: 1.45;
   color: var(--muted);
   letter-spacing: 0.01em;
+  text-shadow: var(--original-shadow);
 }
 
 /* 说话人标签：首字圆形徽章 + 名字，像角色名牌 */
@@ -80,9 +160,9 @@ body {
   margin-right: 7px;
   padding: 1px 9px 1px 1px;
   border-radius: 999px;
-  background: hsl(var(--hue) 62% 52% / 0.18);
-  box-shadow: inset 0 0 0 1px hsl(var(--hue) 72% 62% / 0.3);
-  color: hsl(var(--hue) 78% 80%);
+  background: hsl(var(--hue) 62% 52% / var(--speaker-fill));
+  box-shadow: inset 0 0 0 1px hsl(var(--hue) 72% 62% / var(--speaker-ring));
+  color: hsl(var(--hue) var(--speaker-sat) var(--speaker-lit));
   font-weight: 600;
   letter-spacing: 0.02em;
   vertical-align: -0.08em;
@@ -114,7 +194,7 @@ body {
   margin-right: 9px;
   border-radius: 1px;
   vertical-align: -0.05em;
-  background: color-mix(in srgb, var(--accent) 68%, transparent);
+  background: var(--line);
 }
 
 .translated {
@@ -122,7 +202,7 @@ body {
   font-size: var(--font-size);
   line-height: 1.5;
   color: var(--ink);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  text-shadow: var(--text-shadow);
   letter-spacing: 0.01em;
   word-break: break-word;
   /* 长句自动收字号时平滑过渡，不要一下跳小 */
@@ -164,4 +244,3 @@ body {
 .original[hidden] {
   display: none;
 }
-

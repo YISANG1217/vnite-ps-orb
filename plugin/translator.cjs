@@ -8,6 +8,8 @@ const { translate: CH } = require('./channels.cjs');
 const { createAnalyzer } = require('./analyzer.cjs');
 
 const ENGINES = new Set(['tencent', 'google', 'openai']);
+// 字幕皮肤：只换 CSS 变量，结构不变
+const SKINS = new Set(['glass', 'light', 'paper', 'minimal']);
 
 // 启动时把版本打进日志：排查「装了新版但界面没变」时一眼能看出跑的是哪一版
 const VERSION = (() => {
@@ -56,6 +58,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     ocrEngine: 'paddle',
     foregroundOnly: true,
     themeColor: true,
+    skin: 'glass',
     subtitlePos: 'bottom',
     subtitleOffset: 0,
     region: null
@@ -106,6 +109,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     cfg.ocrEngine = preferences?.translateOcrEngine === 'windows' ? 'windows' : 'paddle';
     cfg.foregroundOnly = preferences?.translateForegroundOnly !== false;
     cfg.themeColor = preferences?.translateThemeColor !== false;
+    cfg.skin = SKINS.has(preferences?.translateSkin) ? preferences.translateSkin : 'glass';
     const interval = Number.parseInt(preferences?.translateInterval, 10);
     cfg.interval = Number.isFinite(interval) ? clamp(interval, 400, 5000) : 1000;
   }
@@ -592,6 +596,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     subtitleWin.loadFile(path.join(__dirname, 'subtitle.html'));
     subtitleWin.webContents.on('did-finish-load', () => {
       if (lastAccent) subtitleWin.webContents.send(CH.accent, lastAccent);
+      // 窗口刚建好时 start() 里的 pushStyle 可能早于页面加载，这里补一次
+      pushStyle();
     });
     subtitleWin.on('closed', () => {
       subtitleWin = null;
@@ -645,7 +651,11 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   function pushStyle() {
     if (!subtitleWin || subtitleWin.isDestroyed()) return;
-    subtitleWin.webContents.send(CH.style, { fontSize: cfg.fontSize, showOriginal: cfg.original });
+    subtitleWin.webContents.send(CH.style, {
+      fontSize: cfg.fontSize,
+      showOriginal: cfg.original,
+      skin: cfg.skin
+    });
   }
 
   // ————— 伴学面板 —————
@@ -1028,7 +1038,46 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return body || raw;
   }
 
-  async function deliver(rawText) {
+  // ————— 翻译队列 —————
+  // 翻译是网络请求，通常比一帧 OCR 慢好几倍。以前主循环会一直等到译文回来，
+  // 等于每句都要把「OCR + 翻译」串行跑完才去抓下一帧。
+  // 现在投递完就返回：OCR 继续轮询，翻译单飞处理，队列里只留最新一句，
+  // 半截台词还没来得及翻就被下一句顶掉，也不会并发打出一堆请求。
+  let translating = false;
+  let pendingTranslation = null;
+
+  function requestTranslation(text, seq) {
+    pendingTranslation = { text, seq };
+    if (translating) return;
+    translating = true;
+    (async () => {
+      try {
+        while (pendingTranslation) {
+          const job = pendingTranslation;
+          pendingTranslation = null;
+          const translated = await translateText(dialogueOf(job.text)).catch(error => {
+            console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
+            return '';
+          });
+          // 关掉翻译后返回的译文不再上屏，否则会把已经收起的字幕条又弹出来
+          if (!running) return;
+          // 等待期间又出了新台词：这次结果已经过期，直接处理队列里的下一句
+          if (job.seq !== deliverSeq) continue;
+          if (translated) {
+            cache.set(job.text, translated);
+            if (cache.size > 200) cache.delete(cache.keys().next().value);
+          }
+          lastTranslated = translated || '';
+          rememberLine(job.text, translated || '');
+          showSubtitle(job.text, translated || '（翻译失败，检查引擎设置）');
+        }
+      } finally {
+        translating = false;
+      }
+    })();
+  }
+
+  function deliver(rawText) {
     // 有的引擎/作品写成「武「台词」」这种不带括号的人名，统一补成【武】再走后续流程
     const text = tagBareSpeaker(rawText);
     lastText = text;
@@ -1047,18 +1096,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       rememberLine(text, cached);
       return;
     }
-    const translated = await translateText(dialogueOf(text)).catch(error => {
-      console.warn('[PS 悬浮球] 翻译失败', error?.message || error);
-      return '';
-    });
-    if (seq !== deliverSeq) return;
-    if (translated) {
-      cache.set(text, translated);
-      if (cache.size > 200) cache.delete(cache.keys().next().value);
-    }
-    lastTranslated = translated || '';
-    rememberLine(text, translated || '');
-    showSubtitle(text, translated || '（翻译失败，检查引擎设置）');
+    // 不等待译文：调用方立刻回去抓下一帧，译文到了再回填
+    requestTranslation(text, seq);
   }
 
   // ————— 文本去抖：同一句被识别成两个版本时字幕不要来回跳 —————
@@ -1395,6 +1434,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     if (pumpTimer) clearTimeout(pumpTimer);
     pumpTimer = null;
     pendingFrame = null;
+    // 丢掉排队中的台词，避免关掉翻译后又有译文冒出来
+    pendingTranslation = null;
     stopOcr();
     stopPaddle();
     stopCaptureStream();
@@ -1731,6 +1772,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         lang: cfg.lang,
         fontSize: cfg.fontSize,
         original: cfg.original,
+        skin: cfg.skin,
         interval: cfg.interval,
         study: cfg.study,
         stream: cfg.stream,
@@ -1754,7 +1796,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
         lastSignature = null;
         if (running && cfg.ocrEngine === 'paddle') startPaddle();
       }
-      if (before.fontSize !== cfg.fontSize || before.original !== cfg.original) pushStyle();
+      if (before.fontSize !== cfg.fontSize || before.original !== cfg.original || before.skin !== cfg.skin) {
+        pushStyle();
+      }
       if (before.interval !== cfg.interval) schedule(cfg.interval);
       if (before.stream !== cfg.stream && running) {
         // 切换取画方式：关掉画面流（避免系统捕获提示常驻），按新方式重来
