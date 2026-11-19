@@ -339,7 +339,8 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   // 同一部作品里同一个角色要一直叫同一个名字。OCR 偶尔会把生僻名字读成形近字
   // （壬→王），只靠「第一次见到的写法」会把第一次的错误永久固定下来，
   // 所以按出现次数投票：同一簇里出现最多的写法当标准名，其余变体往它上面归。
-  const NAME_RE = /【([^】]{1,8})】/g;
+  // 括号种类放宽到〔〕［］：OCR 偶尔会把【】认成形近的这两组
+  const NAME_RE = /[【〔［]([^】〕］]{1,10})[】〕］]/g;
   // 人名只允许假名和汉字：OCR 把引号、括号也吞进来时不能当成人名学习
   const NAME_OK = /^[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]{1,8}$/;
   const nameStats = new Map(

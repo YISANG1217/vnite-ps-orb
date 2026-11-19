@@ -8,7 +8,6 @@
 
   let pendingHeight = 0;
   let baseFont = 22;
-  let showOriginalEnabled = true;
   const PLACEHOLDER = '翻译中…';
 
   // 内容变化后把实际高度回传给主进程，字幕窗底边保持不动。
@@ -34,15 +33,25 @@
     return hash;
   }
 
-  // 上一句原文渐隐后保留 3 秒，方便对照上下文
-  const ghostEl = document.createElement('p');
-  ghostEl.className = 'original ghost';
-  ghostEl.hidden = true;
-  originalEl.before(ghostEl);
-  let ghostTimer = 0;
+  // 人名标签：兼容 __【武】 这类中文括号，偶尔 OCR 会把【】认成形近的〔〕［］
+  const NAME_RE = /^[【〔［]([^】〕］]{1,10})[】〕］]([\s\S]*)$/;
+  // 名字里必须至少有一个假名或汉字，避免把符号当成角色
+  const NAME_OK = /[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]/;
 
-  // 允许前面混进空格/全角空格：OCR 有时会把缩进一起带出来
-  const NAME_RE = /^[\s\u3000]*【([^】]{1,10})】([\s\S]*)$/;
+  // 拆出「说话人 + 台词」。允许【】前面混进 0~2 个杂字符（OCR 偶尔多认一个标点），
+  // 但只在杂字符不是英文数字时才认，免得把正文里的 [注] 之类误当人名。
+  function splitSpeaker(raw) {
+    const head = String(raw || '').replace(/^[\s\u3000\u200b\ufeff]+/, '');
+    const direct = NAME_RE.exec(head);
+    if (direct && NAME_OK.test(direct[1])) {
+      return { name: direct[1].trim(), rest: direct[2] };
+    }
+    const loose = /^([\s\S]{1,2}?)[【〔［]([^】〕］]{1,10})[】〕］]([\s\S]*)$/.exec(head);
+    if (loose && !/[A-Za-z0-9]/.test(loose[1]) && NAME_OK.test(loose[2])) {
+      return { name: loose[2].trim(), rest: loose[3] };
+    }
+    return null;
+  }
 
   // 把一段原文渲染进指定元素：说话人渲染成「首字圆形徽章 + 名字」的角色标签
   function fillOriginal(el, text) {
@@ -53,42 +62,33 @@
       return;
     }
     el.hidden = false;
-    const match = NAME_RE.exec(raw);
-    if (!match) {
+    const parts = splitSpeaker(raw);
+    if (!parts) {
       el.textContent = raw;
       return;
     }
     const speaker = document.createElement('span');
     speaker.className = 'speaker';
-    speaker.style.setProperty('--hue', String(speakerHue(match[1])));
+    speaker.style.setProperty('--hue', String(speakerHue(parts.name)));
     const avatar = document.createElement('span');
     avatar.className = 'avatar';
-    avatar.textContent = [...match[1]][0];
+    avatar.textContent = [...parts.name][0];
     const label = document.createElement('span');
     label.className = 'speaker-name';
-    label.textContent = match[1];
+    label.textContent = parts.name;
     speaker.append(avatar, label);
-    el.append(speaker, document.createTextNode(match[2]));
-  }
-
-  function showGhost(text) {
-    if (!showOriginalEnabled) return;
-    fillOriginal(ghostEl, text);
-    ghostEl.hidden = false;
-    clearTimeout(ghostTimer);
-    ghostTimer = setTimeout(() => {
-      ghostEl.hidden = true;
-      ghostEl.textContent = '';
-      requestAnimationFrame(reportHeight);
-    }, 3000);
+    el.append(speaker, document.createTextNode(parts.rest));
   }
 
   function renderOriginal(text) {
-    const raw = String(text || '');
-    const prev = originalEl.dataset.text || '';
-    if (prev && raw && raw !== prev) showGhost(prev);
-    originalEl.dataset.text = raw;
-    fillOriginal(originalEl, raw);
+    fillOriginal(originalEl, text);
+  }
+
+  // 同一个动画要在连续换句时重播，先摘掉类再强制回流一次
+  function replay(node) {
+    node.classList.remove('is-fresh');
+    void node.offsetWidth;
+    node.classList.add('is-fresh');
   }
 
   let hideTimer = 0;
@@ -112,43 +112,15 @@
   function hideBar() {
     if (!shown) {
       bar.hidden = true;
-      ghostEl.hidden = true;
-      ghostEl.textContent = '';
       return;
     }
     shown = false;
     bar.classList.add('is-hidden');
-    clearTimeout(ghostTimer);
-    ghostEl.hidden = true;
-    ghostEl.textContent = '';
-    originalEl.dataset.text = '';
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       if (shown) return;
       bar.hidden = true;
     }, 180);
-  }
-
-  // 译文按标点切成小段错峰淡入：不是打字机，只是给长句一点阅读节奏
-  function paintTranslated(text) {
-    translatedEl.textContent = '';
-    if (!text) return;
-    if (text === PLACEHOLDER) {
-      translatedEl.textContent = text;
-      return;
-    }
-    const parts = String(text).match(/[^、。，！？…；：,.!?;:]+[、。，！？…；：,.!?;:]*/g) || [text];
-    // 段数太多就合并，保证淡入总时长不超过 0.3 秒
-    const step = Math.max(1, Math.ceil(parts.length / 5));
-    let index = 0;
-    for (let i = 0; i < parts.length; i += step) {
-      const seg = document.createElement('span');
-      seg.className = 'seg';
-      seg.textContent = parts.slice(i, i + step).join('');
-      seg.style.animationDelay = `${Math.min(280, index * 60)}ms`;
-      translatedEl.append(seg);
-      index += 1;
-    }
   }
 
   function render({ original, translated }) {
@@ -162,9 +134,10 @@
     renderOriginal(original || '');
     if (changed) {
       translatedEl.dataset.text = next;
-      paintTranslated(next);
+      translatedEl.textContent = next;
       translatedEl.classList.toggle('is-loading', next === PLACEHOLDER);
       fitFont(next);
+      replay(translatedEl);
     }
     // 同步量一次高度：窗口跟着内容长矮，底部贴边，字幕不会跳一下
     reportHeight();
@@ -176,12 +149,8 @@
       document.documentElement.style.setProperty('--font-size', `${fontSize}px`);
       fitFont(translatedEl.textContent);
     }
-    showOriginalEnabled = showOriginal !== false;
-    if (!showOriginalEnabled) {
+    if (!showOriginal) {
       originalEl.hidden = true;
-      ghostEl.hidden = true;
-      ghostEl.textContent = '';
-      clearTimeout(ghostTimer);
     }
     requestAnimationFrame(reportHeight);
   }

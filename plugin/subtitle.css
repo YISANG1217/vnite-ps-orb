@@ -105,13 +105,6 @@ body {
   font-size: 0.92em;
 }
 
-/* 上一句原文：淡到 35% 保留一会儿，方便对照上下文 */
-.original.ghost {
-  opacity: 0.35;
-  font-size: 0.86em;
-  margin-bottom: 3px;
-}
-
 /* 译文前的主题色竖线：比光晕安静，但每句都能看到一点颜色 */
 .translated::before {
   content: "";
@@ -136,17 +129,19 @@ body {
   transition: font-size 0.16s ease;
 }
 
-/* 译文逐段淡入：按标点切成的小段各带一点延迟 */
-.translated .seg {
-  animation: segIn 0.32s ease both;
+/* 换句时译文淡入上浮，避免生硬跳字 */
+.translated.is-fresh {
+  animation: swap 0.22s ease both;
 }
 
-@keyframes segIn {
+@keyframes swap {
   from {
     opacity: 0;
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
