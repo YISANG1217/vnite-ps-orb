@@ -35,14 +35,14 @@ body {
   padding: 11px 22px 13px;
   border-radius: 16px;
   /* 描边和顶部微光跟随主题色（从游戏画面采样），整体仍然保持深底不抢戏 */
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
   background:
-    radial-gradient(120% 150% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 62%),
+    radial-gradient(140% 190% at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 76%),
     linear-gradient(180deg, rgba(9, 12, 20, 0.82), rgba(6, 8, 14, 0.92));
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.28),
     0 12px 28px rgba(0, 0, 0, 0.32),
-    0 -10px 26px -14px color-mix(in srgb, var(--accent) 55%, transparent);
+    0 -22px 46px -30px color-mix(in srgb, var(--accent) 42%, transparent);
   transform-origin: 50% 100%;
   will-change: opacity, transform;
   transition:
