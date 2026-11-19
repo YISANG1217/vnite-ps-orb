@@ -340,8 +340,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   // （壬→王），只靠「第一次见到的写法」会把第一次的错误永久固定下来，
   // 所以按出现次数投票：同一簇里出现最多的写法当标准名，其余变体往它上面归。
   // 括号种类放宽到〔〕［］：OCR 偶尔会把【】认成形近的这两组；
-  // 闭括号再带上 」』，游戏里常看到 【人名」 这种把 】 认成引号的情况
-  const NAME_RE = /[【〔［]([^】〕］」』]{1,10})[】〕］」』]/g;
+  // 闭括号再带上 」』，游戏里常看到 【人名」 这种把 】 认成引号的情况；
+  // 开头的【也常被认成「，只有后面紧跟另一个「台词引号时才当成人名标签
+  const NAME_RE = /[【〔［]([^】〕］」』]{1,10})[】〕］」』]|[「『]([^】〕］」』]{1,4})[】〕］」』](?=[「『])/g;
   // 人名只允许假名和汉字：OCR 把引号、括号也吞进来时不能当成人名学习
   const NAME_OK = /^[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]{1,8}$/;
   const nameStats = new Map(
@@ -379,7 +380,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
 
   function speakerNames(text) {
     return Array.from(String(text || '').matchAll(NAME_RE))
-      .map(match => match[1].trim())
+      .map(match => (match[1] || match[2] || '').trim())
       .filter(name => name && NAME_OK.test(name));
   }
 
@@ -408,8 +409,10 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
   }
 
   function fixSpeakers(text) {
-    return String(text || '').replace(NAME_RE, (match, raw) => {
-      const name = raw.trim();
+    return String(text || '').replace(NAME_RE, (match, g1, g2) => {
+      // 「开头的那种不改写：改了会把台词引号动掉，只用于识别不用于纠正
+      if (!g1) return match;
+      const name = (g1 || g2 || '').trim();
       if (!name || !NAME_OK.test(name)) return match;
       const canonical = canonicalName(name);
       if (canonical !== name) {

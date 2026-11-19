@@ -35,6 +35,9 @@
 
   // 人名标签：兼容【】〔〕［］，以及 OCR 把 】 认成台词引号 」』 的情况
   const NAME_RE = /^[【〔［]([^】〕］」』]{1,10})[】〕］」』]([\s\S]*)$/;
+  // OCR 也常把开头的【认成「：只有后面还紧跟一个「台词引号时才敢当成名字标签，
+  // 否则正常的「这是台词」会被误当成人名
+  const QUOTE_NAME_RE = /^[「『]([^】〕］」』]{1,4})[】〕］」』]([「『][\s\S]*)$/;
   // 名字里必须至少有一个假名或汉字，避免把符号当成角色
   const NAME_OK = /[\u3040-\u30ff\u4e00-\u9fff々〆ヵヶ]/;
 
@@ -45,6 +48,10 @@
     const direct = NAME_RE.exec(head);
     if (direct && NAME_OK.test(direct[1])) {
       return { name: direct[1].trim(), rest: direct[2] };
+    }
+    const quoted = QUOTE_NAME_RE.exec(head);
+    if (quoted && NAME_OK.test(quoted[1])) {
+      return { name: quoted[1].trim(), rest: quoted[2] };
     }
     const loose = /^([\s\S]{1,2}?)[【〔［]([^】〕］」』]{1,10})[】〕］」』]([\s\S]*)$/.exec(head);
     if (loose && !/[A-Za-z0-9]/.test(loose[1]) && NAME_OK.test(loose[2])) {
