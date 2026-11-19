@@ -335,6 +335,7 @@
   const drawerHintEl = document.getElementById('drawerHint');
   const drawerListEl = document.getElementById('drawerList');
   const drawerExportEl = document.getElementById('drawerExport');
+  const drawerMaskEl = document.getElementById('drawerMask');
   let drawerMode = '';
 
   function span(className, text) {
@@ -362,6 +363,8 @@
     return item;
   }
 
+  let maskMeanings = false;
+
   function renderWordbook(items) {
     items.forEach(entry => {
       const item = drawerRow();
@@ -372,10 +375,33 @@
         head.appendChild(span('reading', entry.reading));
       }
       if (entry.pos) head.appendChild(span('pos', entry.pos));
+      // 单条删除：平时隐藏，鼠标移到这一行才出现
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'wb-remove';
+      remove.textContent = '×';
+      remove.title = '从生词本删除';
+      remove.addEventListener('click', async event => {
+        event.stopPropagation();
+        const list = await api.wordbookRemove(entry.key).catch(() => null);
+        item.remove();
+        if (Array.isArray(list)) {
+          drawerHintEl.textContent = list.length ? `共 ${list.length} 个词 · 点单词自动收录` : '';
+          if (!list.length) drawerListEl.appendChild(empty('生词本已清空'));
+        }
+      });
+      head.appendChild(remove);
       item.appendChild(head);
-      if (entry.meaning) item.appendChild(span('meaning', entry.meaning));
+      if (entry.meaning) {
+        const meaning = span('meaning wb-meaning', entry.meaning);
+        meaning.title = '点一下显示或遮住释义';
+        meaning.addEventListener('click', () => meaning.classList.toggle('is-revealed'));
+        item.appendChild(meaning);
+      }
       drawerListEl.appendChild(item);
     });
+    // 复习模式：释义先糊住，自己回想完再点开
+    drawerListEl.classList.toggle('is-masked', maskMeanings);
   }
 
   function renderHistory(items) {
@@ -454,6 +480,10 @@
     drawerTitleEl.textContent =
       mode === 'wordbook' ? '生词本' : mode === 'history' ? '最近字幕' : '人名';
     drawerExportEl.hidden = mode !== 'wordbook';
+    if (drawerMaskEl) {
+      drawerMaskEl.hidden = mode !== 'wordbook';
+      drawerMaskEl.textContent = maskMeanings ? '显示释义' : '遮住释义';
+    }
     drawerListEl.textContent = '';
     const items = await (
       mode === 'wordbook' ? api.wordbookList() : mode === 'history' ? api.history() : api.names()
@@ -492,6 +522,14 @@
   drawerExportEl?.addEventListener('click', async () => {
     const result = await api.wordbookExport().catch(() => null);
     drawerHintEl.textContent = result?.file ? `已导出到 ${result.file}` : '导出失败';
+  });
+
+  // 复习模式：只切换显示方式，不重新请求数据
+  drawerMaskEl?.addEventListener('click', () => {
+    maskMeanings = !maskMeanings;
+    drawerMaskEl.textContent = maskMeanings ? '显示释义' : '遮住释义';
+    drawerListEl.classList.toggle('is-masked', maskMeanings);
+    drawerListEl.querySelectorAll('.wb-meaning.is-revealed').forEach(node => node.classList.remove('is-revealed'));
   });
 
   api.onStudy(render);

@@ -378,6 +378,21 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     }, 4000);
   }
 
+  // 没有括号的人名：武「だ、黙ってろ！」/ 武：「……」
+  // 只认已经学到或确认过的人名，普通台词开头的词不会被误当角色
+  const BARE_RE = /^([\u4e00-\u9fff\u3040-\u30ff々〆ヵヶ]{1,8})[「『：:]/;
+
+  function tagBareSpeaker(text) {
+    const raw = String(text || '');
+    if (/[【〔［]/.test(raw)) return raw;
+    const match = BARE_RE.exec(raw);
+    if (!match) return raw;
+    const name = match[1];
+    if (!nameStats.has(name) && !glossary.has(name)) return raw;
+    debugLog(`无括号人名 ${name}`);
+    return `【${name}】${raw.slice(name.length)}`;
+  }
+
   function speakerNames(text) {
     return Array.from(String(text || '').matchAll(NAME_RE))
       .map(match => (match[1] || match[2] || '').trim())
@@ -1013,7 +1028,9 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return body || raw;
   }
 
-  async function deliver(text) {
+  async function deliver(rawText) {
+    // 有的引擎/作品写成「武「台词」」这种不带括号的人名，统一补成【武】再走后续流程
+    const text = tagBareSpeaker(rawText);
     lastText = text;
     learnSpeakers(text);
     const seq = (deliverSeq += 1);
@@ -1622,6 +1639,17 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
     return wordbookList();
   });
 
+  ipcMain.handle(CH.studyWordbookRemove, (event, key) => {
+    if (!fromStudy(event)) return [];
+    const target = String(key || '');
+    const index = wordbook.findIndex(item => item.key === target);
+    if (index !== -1) {
+      wordbook.splice(index, 1);
+      writeState({ wordbook });
+    }
+    return wordbookList();
+  });
+
   ipcMain.handle(CH.studyWordbookExport, event => {
     if (!fromStudy(event)) return { error: 'forbidden' };
     try {
@@ -1795,6 +1823,7 @@ function createTranslator({ api, stateFile, readState, writeState, refreshTray, 
       ipcMain.removeHandler(CH.studyLookup);
       ipcMain.removeHandler(CH.studyWordbookAdd);
       ipcMain.removeHandler(CH.studyWordbookList);
+      ipcMain.removeHandler(CH.studyWordbookRemove);
       ipcMain.removeHandler(CH.studyWordbookExport);
       ipcMain.removeHandler(CH.studyHistory);
       ipcMain.removeHandler(CH.studyNames);

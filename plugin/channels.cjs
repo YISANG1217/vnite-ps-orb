@@ -15,6 +15,7 @@ module.exports = {
     accent: `${id}:tr-accent`,
     studyLookup: `${id}:tr-study-lookup`,
     studyWordbookAdd: `${id}:tr-study-wordbook-add`,
+    studyWordbookRemove: `${id}:tr-study-wordbook-remove`,
     studyWordbookList: `${id}:tr-study-wordbook-list`,
     studyWordbookExport: `${id}:tr-study-wordbook-export`,
     studyHistory: `${id}:tr-study-history`,

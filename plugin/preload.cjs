@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('psOrb', {
   studyResize: size => ipcRenderer.send(TR.studyResize, size),
   lookupWord: payload => ipcRenderer.invoke(TR.studyLookup, payload),
   wordbookAdd: payload => ipcRenderer.invoke(TR.studyWordbookAdd, payload),
+  wordbookRemove: key => ipcRenderer.invoke(TR.studyWordbookRemove, key),
   wordbookList: () => ipcRenderer.invoke(TR.studyWordbookList),
   wordbookExport: () => ipcRenderer.invoke(TR.studyWordbookExport),
   history: () => ipcRenderer.invoke(TR.studyHistory),
