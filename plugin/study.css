@@ -80,12 +80,6 @@ html.is-dragging * {
   color: color-mix(in srgb, var(--accent) 84%, #ffffff);
 }
 
-.head-hint {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-}
-
 .card-body {
   flex: 1;
   min-height: 0;
